@@ -1,0 +1,11 @@
+{
+  "id": "MerchantBlacklist",
+  "pck_name": "MerchantBlacklist",
+  "version": "0.1.0",
+  "name": "商店黑名单 / Merchant Blacklist",
+  "author": "bili@我叫煎包",
+  "description": "在本机商店生成时过滤被拉黑的遗物与药水（普通商人 + 先古商人）。仅过滤本地玩家自己的商店库存，不影响宝箱/精英/Boss/事件奖励，不发任何网络消息，对端零感知。\nFilters blacklisted relics and potions out of the local player's merchant inventory (normal + ancient merchant). Local-only view filtering; never touches elite/boss/chest/event rewards; sends no network messages.",
+  "has_pck": false,
+  "has_dll": true,
+  "affects_gameplay": true
+}

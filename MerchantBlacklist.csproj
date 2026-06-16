@@ -1,0 +1,16 @@
+<Project Sdk="Godot.NET.Sdk/4.5.1">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <RootNamespace>MerchantBlacklist</RootNamespace>
+    <AssemblyName>MerchantBlacklist</AssemblyName>
+    <Version>0.1.0</Version>
+    <FileVersion>0.1.0</FileVersion>
+    <AssemblyVersion>0.1.0</AssemblyVersion>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Lib.Harmony" Version="2.3.3" />
+  </ItemGroup>
+</Project>

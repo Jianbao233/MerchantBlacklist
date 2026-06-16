@@ -1,0 +1,25 @@
+# Godot / .NET build outputs
+.godot/
+bin/
+obj/
+*.dll
+*.pdb
+*.deps.json
+*.runtimeconfig.json
+*.pck
+*.import
+project.godot.lock
+
+# Local release snapshots
+torelease/
+toRelease/
+release/
+dist/
+*.zip
+
+# IDE
+.vs/
+.vscode/
+*.user
+*.suo
+*.cache
