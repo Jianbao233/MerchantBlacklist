@@ -23,3 +23,6 @@ dist/
 *.user
 *.suo
 *.cache
+
+# 内部 TODO（不发公开仓 / 不发 GitHub issue）
+docs/TODO_internal.md

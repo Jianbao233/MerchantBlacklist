@@ -26,6 +26,7 @@ public static class MerchantBlacklistMod
             BlacklistStore.LoadFromDisk();
             MerchantBlacklistLog.Info($"Loaded. Banned relics={BlacklistStore.RelicCount}, potions={BlacklistStore.PotionCount}.");
             EnsureInputNode();
+            HotkeyService.Initialize();
         }
         catch (Exception ex)
         {

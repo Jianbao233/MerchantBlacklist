@@ -76,6 +76,24 @@ internal static class BlacklistStore
         return nowBanned;
     }
 
+    public static bool AddRelic(string entryId)
+    {
+        if (string.IsNullOrEmpty(entryId)) return false;
+        bool added;
+        lock (_gate) added = _relicBlacklist.Add(entryId);
+        if (added) SaveToDisk();
+        return added;
+    }
+
+    public static bool AddPotion(string entryId)
+    {
+        if (string.IsNullOrEmpty(entryId)) return false;
+        bool added;
+        lock (_gate) added = _potionBlacklist.Add(entryId);
+        if (added) SaveToDisk();
+        return added;
+    }
+
     public static void SetRelics(IEnumerable<string> ids)
     {
         lock (_gate)

@@ -116,6 +116,8 @@ internal static class ModelCatalog
                 var rarity = rarityProp?.GetValue(model);
                 var rarityName = rarity?.ToString() ?? string.Empty;
 
+                if (!IsRelicRarityInShopPool(rarityName)) continue;
+
                 list.Add(new Entry
                 {
                     Id = entryId,
@@ -162,6 +164,8 @@ internal static class ModelCatalog
 
                 var rarity = rarityProp?.GetValue(model);
                 var rarityName = rarity?.ToString() ?? string.Empty;
+
+                if (!IsPotionRarityInShopPool(rarityName)) continue;
 
                 list.Add(new Entry
                 {
@@ -215,13 +219,10 @@ internal static class ModelCatalog
 
     private static int RarityOrderRelic(string rarity) => rarity switch
     {
-        "Starter" => 0,
-        "Common" => 1,
-        "Uncommon" => 2,
-        "Rare" => 3,
-        "Boss" => 4,
-        "Special" => 5,
-        "Shop" => 6,
+        "Common" => 0,
+        "Uncommon" => 1,
+        "Rare" => 2,
+        "Shop" => 3,
         _ => 9,
     };
 
@@ -232,6 +233,24 @@ internal static class ModelCatalog
         "Rare" => 2,
         _ => 9,
     };
+
+    /// <summary>
+    /// 商店遗物池：参考 MerchantInventory.PopulateRelicEntries / RelicGrabBag._rarities，
+    /// 仅 Common/Uncommon/Rare/Shop 四档会出现在商店刷新中。
+    /// </summary>
+    private static bool IsRelicRarityInShopPool(string rarity)
+    {
+        return rarity == "Common" || rarity == "Uncommon" || rarity == "Rare" || rarity == "Shop";
+    }
+
+    /// <summary>
+    /// 商店药水池：PotionFactory.CreateRandomPotionsOutOfCombat 只滚 Common/Uncommon/Rare，
+    /// 排除 None/Event/Token 三个非池稀有度。
+    /// </summary>
+    private static bool IsPotionRarityInShopPool(string rarity)
+    {
+        return rarity == "Common" || rarity == "Uncommon" || rarity == "Rare";
+    }
 
     private static Type FindType(string fullName)
     {
