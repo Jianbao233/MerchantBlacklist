@@ -1,10 +1,10 @@
 {
   "id": "MerchantBlacklist",
   "pck_name": "MerchantBlacklist",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "name": "商店黑名单 / Merchant Blacklist",
   "author": "bili@我叫煎包",
-  "description": "【适配 STS2 0.107】在本机商店生成时过滤被拉黑的遗物与药水（普通商人 + 先古商人）。仅过滤本地玩家自己的商店库存，不影响宝箱/精英/Boss/事件奖励，不发任何网络消息，对端零感知。暂停菜单注入「商店黑名单」按钮（默认 F10 切换），支持 ModConfig 改键、RitsuLib 热键路由器、面板内右键即时拉黑，跟随客户端语言显示中/英文。\nCompatible with STS2 0.107. Filters blacklisted relics and potions out of the local player's merchant inventory (normal + ancient merchant). Local-only view filtering; never touches elite/boss/chest/event rewards; sends no network messages. Adds a 'Shop Blacklist' button to the pause menu (default F10), supports ModConfig rebinding, RitsuLib hotkey router, right-click-to-ban inside the shop panel, and follows client language for ZH/EN UI.",
+  "description": "【适配 STS2 0.107】在本机商店生成时过滤被拉黑的遗物与药水（普通商人 + 先古商人）。仅过滤本地玩家自己的商店库存，不影响宝箱/精英/Boss/事件奖励，不发任何网络消息，对端零感知。联机时仅在主机/单机生效（客机由主机权威库存决定）。暂停菜单注入「商店黑名单」按钮（默认 F10 切换），支持 ModConfig 改键、RitsuLib 热键路由器、Shift+右键即时拉黑（修饰键可改），跟随客户端语言显示中/英文。\nCompatible with STS2 0.107. Filters blacklisted relics and potions out of the local player's merchant inventory (normal + ancient merchant). Local-only view filtering; never touches elite/boss/chest/event rewards; sends no network messages. In multiplayer the filter only takes effect on host/singleplayer (client peers see the host's authoritative inventory). Adds a 'Shop Blacklist' button to the pause menu (default F10), supports ModConfig rebinding, RitsuLib hotkey router, Shift+RightClick to ban inside the shop (modifier configurable), and follows client language for ZH/EN UI.",
   "has_pck": false,
   "has_dll": true,
   "affects_gameplay": false

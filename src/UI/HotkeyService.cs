@@ -32,9 +32,14 @@ namespace MerchantBlacklist.UI;
 internal static class HotkeyService
 {
     public const string ModConfigKey = "toggle_panel_hotkey";
+    public const string ModConfigRightClickModifierKey = "right_click_modifier";
     public const string RitsuHotkeyId = "MerchantBlacklist.TogglePanel";
 
     public static long ToggleKeyCode { get; private set; } = (long)Key.F10;
+
+    /// <summary>商店内右键 ban 要求按住的修饰键。默认 Shift，避免误 ban。</summary>
+    public enum Modifier { None = 0, Shift = 1, Ctrl = 2, Alt = 3 }
+    public static Modifier RightClickModifier { get; private set; } = Modifier.Shift;
 
     /// <summary>
     /// ritsulib RuntimeHotkeyService 已经接管热键路由后置 true。
@@ -125,8 +130,9 @@ internal static class HotkeyService
         }
         catch { /* 第一次注册时还没值，正常 */ }
 
-        var entries = Array.CreateInstance(entryType, 1);
+        var entries = Array.CreateInstance(entryType, 2);
         entries.SetValue(entry, 0);
+        entries.SetValue(BuildRightClickModifierEntry(entryType, typeEnum, apiType), 1);
 
         var displayNames = new Dictionary<string, string>
         {
@@ -181,6 +187,76 @@ internal static class HotkeyService
         {
             MerchantBlacklistLog.Warn($"OnModConfigChanged failed: {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// 构造「右键 ban 修饰键」Dropdown ConfigEntry。
+    /// 存值：string（"None" / "Shift" / "Ctrl" / "Alt"），默认 "Shift"。
+    /// 注册前会从 ModConfigManager 读一次旧值同步进 RightClickModifier。
+    /// </summary>
+    private static object BuildRightClickModifierEntry(Type entryType, Type typeEnum, Type apiType)
+    {
+        var modEntry = Activator.CreateInstance(entryType);
+        SetProp(modEntry, "Key", ModConfigRightClickModifierKey);
+        SetProp(modEntry, "Label", "Shop right-click ban modifier");
+        SetProp(modEntry, "Labels", new Dictionary<string, string>
+        {
+            ["en"]  = "Shop right-click ban modifier",
+            ["zhs"] = "商店右键拉黑 修饰键",
+            ["zht"] = "商店右鍵拉黑 修飾鍵",
+        });
+        SetProp(modEntry, "Description", "Hold this modifier with right-click to ban a relic/potion in shop. Set to None to ban with bare right-click.");
+        SetProp(modEntry, "Descriptions", new Dictionary<string, string>
+        {
+            ["en"]  = "Hold this modifier with right-click to ban a relic/potion in shop. Set to None to ban with bare right-click.",
+            ["zhs"] = "在商店内按住此修饰键 + 右键即可拉黑遗物/药水。设为 None 则裸右键即拉黑。",
+            ["zht"] = "在商店內按住此修飾鍵 + 右鍵即可拉黑遺物/藥水。設為 None 則裸右鍵即拉黑。",
+        });
+        SetProp(modEntry, "Type", Enum.Parse(typeEnum, "Dropdown"));
+        SetProp(modEntry, "DefaultValue", "Shift");
+        SetProp(modEntry, "Options", new[] { "None", "Shift", "Ctrl", "Alt" });
+
+        Action<object> onChanged = OnRightClickModifierChanged;
+        SetProp(modEntry, "OnChanged", onChanged);
+
+        try
+        {
+            var getValue = apiType.GetMethod("GetValue", BindingFlags.Public | BindingFlags.Static);
+            if (getValue != null)
+            {
+                var generic = getValue.MakeGenericMethod(typeof(string));
+                var v = generic.Invoke(null, new object[] { MerchantBlacklistMod.ModId, ModConfigRightClickModifierKey }) as string;
+                if (!string.IsNullOrEmpty(v)) ApplyRightClickModifierFromString(v);
+            }
+        }
+        catch { }
+
+        return modEntry;
+    }
+
+    private static void OnRightClickModifierChanged(object value)
+    {
+        try
+        {
+            ApplyRightClickModifierFromString(value?.ToString());
+            MerchantBlacklistLog.Info($"ModConfig right-click modifier → {RightClickModifier}.");
+        }
+        catch (Exception ex)
+        {
+            MerchantBlacklistLog.Warn($"OnRightClickModifierChanged failed: {ex.Message}");
+        }
+    }
+
+    private static void ApplyRightClickModifierFromString(string s)
+    {
+        RightClickModifier = (s ?? "Shift").Trim().ToLowerInvariant() switch
+        {
+            "none"  => Modifier.None,
+            "shift" => Modifier.Shift,
+            "ctrl"  => Modifier.Ctrl,
+            "alt"   => Modifier.Alt,
+            _ => Modifier.Shift,
+        };
     }
 
     // ── RitsuLib 通道 ───────────────────────────────────────────────────
