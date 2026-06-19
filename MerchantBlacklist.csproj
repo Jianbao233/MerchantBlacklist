@@ -4,9 +4,9 @@
     <EnableDynamicLoading>true</EnableDynamicLoading>
     <RootNamespace>MerchantBlacklist</RootNamespace>
     <AssemblyName>MerchantBlacklist</AssemblyName>
-    <Version>0.1.0</Version>
-    <FileVersion>0.1.0</FileVersion>
-    <AssemblyVersion>0.1.0</AssemblyVersion>
+    <Version>0.1.2</Version>
+    <FileVersion>0.1.2</FileVersion>
+    <AssemblyVersion>0.1.2</AssemblyVersion>
     <LangVersion>latest</LangVersion>
     <Nullable>disable</Nullable>
   </PropertyGroup>

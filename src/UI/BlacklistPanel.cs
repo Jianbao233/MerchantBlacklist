@@ -256,51 +256,12 @@ public partial class BlacklistPanel : CanvasLayer
         _window.AddChild(_vbox);
 
         _BuildTitleBar();
-        _BuildClientBanner();
         _BuildTabBar();
         _BuildScroll();
         _BuildHintBar();
 
         AddChild(_window);
         _builtOnce = true;
-    }
-
-    /// <summary>
-    /// 客机模式下的醒目红字 banner：仅显示，不影响 UI 操作。
-    /// 提示玩家：联机时只有主机生效，副机本地任何修改都不会影响商店库存。
-    /// </summary>
-    private void _BuildClientBanner()
-    {
-        if (!MerchantBlacklist.Core.MultiplayerSession.IsClient) return;
-
-        var banner = new PanelContainer
-        {
-            Name = "ClientBanner",
-            SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
-            CustomMinimumSize = new Vector2(0, 28),
-        };
-        var style = new StyleBoxFlat
-        {
-            BgColor = new Color(0.45f, 0.10f, 0.10f, 0.95f),
-            BorderColor = new Color(1f, 0.65f, 0.4f, 1f),
-            BorderWidthTop = 1,
-            BorderWidthBottom = 1,
-        };
-        banner.AddThemeStyleboxOverride("panel", style);
-
-        var label = new Label
-        {
-            Text = _Loc(
-                "  联机客机模式：黑名单仅主机生效，本机改动当前商店不会变化",
-                "  Multiplayer client: blacklist only takes effect on the host; local changes won't affect this shop"),
-            HorizontalAlignment = HorizontalAlignment.Center,
-            VerticalAlignment = VerticalAlignment.Center,
-            SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
-        };
-        label.AddThemeColorOverride("font_color", new Color(1f, 0.92f, 0.78f, 1f));
-        label.AddThemeFontSizeOverride("font_size", 14);
-        banner.AddChild(label);
-        _vbox.AddChild(banner);
     }
 
     private void _BuildTitleBar()

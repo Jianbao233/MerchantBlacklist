@@ -99,13 +99,6 @@ internal static class ShopRightClickBanShared
         if (!mb.Pressed) return;
         if (mb.ButtonIndex != MouseButton.Right) return;
 
-        // 客机模式：主机才是商店库存权威源；客机本地 ban 会让"看见≠拿到"。
-        if (MerchantBlacklist.Core.MultiplayerSession.IsClient)
-        {
-            MerchantBlacklistLog.Info("Right-click ban suppressed on client peer.");
-            return;
-        }
-
         // 修饰键门卫：默认要求 Shift+RMB 才触发，避免误 ban。
         // 由 HotkeyService.RightClickModifier 决定（None/Shift/Ctrl/Alt），ModConfig 可改。
         if (!IsRequiredModifierPressed(mb))
