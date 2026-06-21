@@ -13,4 +13,8 @@
   <ItemGroup>
     <PackageReference Include="Lib.Harmony" Version="2.3.3" />
   </ItemGroup>
+  <ItemGroup>
+    <AssemblyMetadata Include="RitsuLib.ModSettingsInterop.ProviderType" Value="MerchantBlacklist.UI.MerchantBlacklistRitsuSettingsProvider" />
+    <AssemblyMetadata Include="RitsuLib.ModSettingsMirror.Mod.MerchantBlacklist.DisableSources" Value="ModConfig" />
+  </ItemGroup>
 </Project>

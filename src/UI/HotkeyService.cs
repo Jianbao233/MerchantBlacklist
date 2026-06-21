@@ -34,8 +34,11 @@ internal static class HotkeyService
     public const string ModConfigKey = "toggle_panel_hotkey";
     public const string ModConfigRightClickModifierKey = "right_click_modifier";
     public const string RitsuHotkeyId = "MerchantBlacklist.TogglePanel";
+    public const string DefaultToggleBinding = "F10";
+    public const string DefaultRightClickModifier = "Shift";
 
     public static long ToggleKeyCode { get; private set; } = (long)Key.F10;
+    internal static string ToggleBindingText => KeyCodeToBinding(ToggleKeyCode) ?? "F10";
 
     /// <summary>商店内右键 ban 要求按住的修饰键。默认 Shift，避免误 ban。</summary>
     public enum Modifier { None = 0, Shift = 1, Ctrl = 2, Alt = 3 }
@@ -168,25 +171,37 @@ internal static class HotkeyService
         {
             long newCode = Convert.ToInt64(value);
             if (newCode <= 0) newCode = (long)Key.F10;
-            ToggleKeyCode = newCode;
-            MerchantBlacklistLog.Info($"ModConfig hotkey changed → {newCode} (Key={CurrentKey}).");
-
-            // 同步给 ritsulib 句柄（如果存在）
-            if (_ritsuHandle != null && _ritsuTryRebindSingle != null)
-            {
-                var bindingText = KeyCodeToBinding(newCode);
-                if (!string.IsNullOrEmpty(bindingText))
-                {
-                    var args = new object[] { bindingText, null };
-                    var ok = _ritsuTryRebindSingle.Invoke(_ritsuHandle, args);
-                    MerchantBlacklistLog.Info($"RitsuLib rebind → {bindingText} (ok={ok}).");
-                }
-            }
+            ApplyToggleKeyCode(newCode, "ModConfig hotkey changed");
         }
         catch (Exception ex)
         {
             MerchantBlacklistLog.Warn($"OnModConfigChanged failed: {ex.Message}");
         }
+    }
+
+    internal static void SetToggleBindingFromRitsuLib(string binding)
+    {
+        var newCode = BindingToKeyCode(binding);
+        ApplyToggleKeyCode(newCode, "RitsuLib hotkey changed");
+        TrySetModConfigValue(ModConfigKey, newCode);
+    }
+
+    private static void ApplyToggleKeyCode(long newCode, string source)
+    {
+        if (newCode <= 0) newCode = (long)Key.F10;
+        ToggleKeyCode = newCode;
+        MerchantBlacklistLog.Info($"{source} → {newCode} (Key={CurrentKey}).");
+
+        if (_ritsuHandle == null || _ritsuTryRebindSingle == null)
+            return;
+
+        var bindingText = KeyCodeToBinding(newCode);
+        if (string.IsNullOrEmpty(bindingText))
+            return;
+
+        var args = new object[] { bindingText, null };
+        var ok = _ritsuTryRebindSingle.Invoke(_ritsuHandle, args);
+        MerchantBlacklistLog.Info($"RitsuLib rebind → {bindingText} (ok={ok}).");
     }
 
     /// <summary>
@@ -213,7 +228,7 @@ internal static class HotkeyService
             ["zht"] = "在商店內按住此修飾鍵 + 右鍵即可拉黑遺物/藥水。設為 None 則裸右鍵即拉黑。",
         });
         SetProp(modEntry, "Type", Enum.Parse(typeEnum, "Dropdown"));
-        SetProp(modEntry, "DefaultValue", "Shift");
+        SetProp(modEntry, "DefaultValue", DefaultRightClickModifier);
         SetProp(modEntry, "Options", new[] { "None", "Shift", "Ctrl", "Alt" });
 
         Action<object> onChanged = OnRightClickModifierChanged;
@@ -247,9 +262,15 @@ internal static class HotkeyService
         }
     }
 
+    internal static void SetRightClickModifierFromRitsuLib(string s)
+    {
+        ApplyRightClickModifierFromString(s);
+        TrySetModConfigValue(ModConfigRightClickModifierKey, RightClickModifier.ToString());
+    }
+
     private static void ApplyRightClickModifierFromString(string s)
     {
-        RightClickModifier = (s ?? "Shift").Trim().ToLowerInvariant() switch
+        RightClickModifier = (s ?? DefaultRightClickModifier).Trim().ToLowerInvariant() switch
         {
             "none"  => Modifier.None,
             "shift" => Modifier.Shift,
@@ -305,7 +326,7 @@ internal static class HotkeyService
             SetProp(opts, "DebugName", "MerchantBlacklist/Toggle");
         }
 
-        var binding = KeyCodeToBinding(ToggleKeyCode) ?? "F10";
+        var binding = KeyCodeToBinding(ToggleKeyCode) ?? DefaultToggleBinding;
         Action callback = () => BlacklistPanel.Toggle();
         try
         {
@@ -372,6 +393,51 @@ internal static class HotkeyService
         return prefix + OS.GetKeycodeString(key);
     }
 
+    private static long BindingToKeyCode(string binding)
+    {
+        const long modShift = 0x02000000;
+        const long modCtrl  = 0x04000000;
+        const long modAlt   = 0x08000000;
+        const long modMeta  = 0x10000000;
+
+        if (string.IsNullOrWhiteSpace(binding))
+            return (long)Key.F10;
+
+        var parts = binding.Split(new[] { '+' }, StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length == 0)
+            return (long)Key.F10;
+
+        long modifiers = 0;
+        for (var i = 0; i < parts.Length - 1; i++)
+        {
+            switch (parts[i].Trim().ToLowerInvariant())
+            {
+                case "shift":
+                    modifiers |= modShift;
+                    break;
+                case "ctrl":
+                case "control":
+                    modifiers |= modCtrl;
+                    break;
+                case "alt":
+                    modifiers |= modAlt;
+                    break;
+                case "meta":
+                case "cmd":
+                case "command":
+                case "super":
+                    modifiers |= modMeta;
+                    break;
+            }
+        }
+
+        var keyName = parts[^1].Trim();
+        if (!Enum.TryParse<Key>(keyName, true, out var key) || key == 0)
+            key = Key.F10;
+
+        return modifiers | (long)key;
+    }
+
     private static void SetProp(object target, string name, object value)
     {
         if (target == null) return;
@@ -379,6 +445,20 @@ internal static class HotkeyService
         if (p != null && p.CanWrite)
         {
             try { p.SetValue(target, value); } catch { }
+        }
+    }
+
+    private static void TrySetModConfigValue(string key, object value)
+    {
+        try
+        {
+            var apiType = FindType("ModConfig.ModConfigApi");
+            var setValue = apiType?.GetMethod("SetValue", BindingFlags.Public | BindingFlags.Static);
+            setValue?.Invoke(null, new object[] { MerchantBlacklistMod.ModId, key, value });
+        }
+        catch (Exception ex)
+        {
+            MerchantBlacklistLog.Warn($"ModConfig sync failed [{key}]: {ex.Message}");
         }
     }
 
