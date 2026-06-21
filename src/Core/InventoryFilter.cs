@@ -21,6 +21,7 @@ internal static class InventoryFilter
     private static Type _relicModelType;
     private static Type _potionModelType;
     private static Type _modelIdType;
+    private static Type _modelDbType;
 
     private static FieldInfo _relicEntriesField;
     private static FieldInfo _potionEntriesField;
@@ -60,10 +61,12 @@ internal static class InventoryFilter
             _relicModelType = FindType("MegaCrit.Sts2.Core.Models.RelicModel");
             _potionModelType = FindType("MegaCrit.Sts2.Core.Models.PotionModel");
             _modelIdType = FindType("MegaCrit.Sts2.Core.Models.ModelId");
+            _modelDbType = FindType("MegaCrit.Sts2.Core.Models.ModelDb");
 
             if (_merchantInventoryType == null || _merchantRelicEntryType == null || _merchantPotionEntryType == null
                 || _relicFactoryType == null || _potionFactoryType == null
-                || _relicModelType == null || _potionModelType == null || _modelIdType == null)
+                || _relicModelType == null || _potionModelType == null || _modelIdType == null
+                || _modelDbType == null)
             {
                 _initFailed = true;
                 return false;
@@ -190,30 +193,52 @@ internal static class InventoryFilter
 
     private static object TryRerollRelic(object player, object rarity, HashSet<string> alreadyChosen, string origId)
     {
-        if (_pullNextRelicFromBackFiltered == null) return null;
+        // 不走 RelicFactory.PullFromBack（会永久消耗 grab bag，导致遗物池耗尽出现"头环"）。
+        // 改为从 ModelDb.AllRelics 中查找同稀有度、非 ban、非已选、允许在商店出现的遗物，
+        // 取 ToMutable() 实例，不碰 grab bag。
+        var allRelicsProp = _modelDbType?.GetProperty("AllRelics", BindingFlags.Public | BindingFlags.Static);
+        var allRelics = allRelicsProp?.GetValue(null) as System.Collections.IEnumerable;
+        if (allRelics == null) return null;
 
-        Func<object, bool> filter = relicModel =>
+        // 收集候选列表
+        var candidates = new System.Collections.Generic.List<object>();
+        foreach (var relic in allRelics)
         {
-            var entryId = GetEntryIdFromModel(relicModel);
-            if (string.IsNullOrEmpty(entryId)) return false;
-            if (BlacklistStore.IsRelicBanned(entryId)) return false;
-            if (entryId != origId && alreadyChosen.Contains(entryId)) return false;
-            var allowed = (bool)(_isAllowedInShopsProp?.GetValue(relicModel) ?? false);
-            return allowed;
-        };
+            if (relic == null) continue;
+            var entryId = GetEntryIdFromModel(relic);
+            if (string.IsNullOrEmpty(entryId)) continue;
+            if (entryId == origId) continue;
+            if (BlacklistStore.IsRelicBanned(entryId)) continue;
+            if (alreadyChosen.Contains(entryId)) continue;
 
-        var delegateType = _pullNextRelicFromBackFiltered.GetParameters()[2].ParameterType;
-        var typedFilter = BuildTypedPredicate(filter, _relicModelType, delegateType);
+            // 检查稀有度匹配
+            var relicRarity = _relicRarityProp?.GetValue(relic);
+            if (relicRarity == null || !relicRarity.Equals(rarity)) continue;
 
-        var result = _pullNextRelicFromBackFiltered.Invoke(null, new[] { player, rarity, typedFilter });
-        if (result == null) return null;
+            // 检查允许在商店出现
+            var allowed = (bool)(_isAllowedInShopsProp?.GetValue(relic) ?? false);
+            if (!allowed) continue;
 
-        var resultId = GetEntryIdFromModel(result);
-        if (string.IsNullOrEmpty(resultId) || BlacklistStore.IsRelicBanned(resultId))
-        {
-            return null;
+            candidates.Add(relic);
         }
-        return result;
+
+        if (candidates.Count == 0) return null;
+
+        // 随机选一个（用 player 的 Shops RNG 保持确定性）
+        var playerRng = _playerRngProp?.GetValue(player);
+        var shopsRng = _shopsRngProp?.GetValue(playerRng);
+        int index;
+        if (shopsRng != null)
+        {
+            var nextIntMethod = shopsRng.GetType().GetMethod("NextInt", new[] { typeof(int) });
+            index = (int)(nextIntMethod?.Invoke(shopsRng, new object[] { candidates.Count }) ?? 0);
+        }
+        else
+        {
+            index = new System.Random().Next(candidates.Count);
+        }
+
+        return candidates[index % candidates.Count];
     }
 
     private static void FilterPotions(object inventory)

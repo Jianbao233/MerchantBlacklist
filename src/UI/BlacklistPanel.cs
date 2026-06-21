@@ -80,6 +80,8 @@ public partial class BlacklistPanel : CanvasLayer
     private ScrollContainer _scroll;
     private Button _relicTabBtn;
     private Button _potionTabBtn;
+    private Button _globalCatBtn;
+    private OptionButton _charCatBtn;
     private Tab _currentTab = Tab.Relics;
     private bool _builtOnce;
     private bool _isVisible;
@@ -119,9 +121,42 @@ public partial class BlacklistPanel : CanvasLayer
     {
         if (_window == null || !GodotObject.IsInstanceValid(_window)) _BuildUI();
         if (_window == null) return;
+        // 自动检测当前角色，切换到对应分类
+        _AutoDetectCharacter();
         _window.Visible = true;
         _isVisible = true;
         _RefreshContent();
+    }
+
+    private void _AutoDetectCharacter()
+    {
+        var charId = CharacterDetector.GetCurrentCharacterId();
+        if (charId != null && Array.IndexOf(CharacterDetector.KnownCharacters, charId) >= 0)
+        {
+            BlacklistStore.ActiveCategory = charId;
+        }
+        else
+        {
+            BlacklistStore.ActiveCategory = "GLOBAL";
+        }
+        _UpdateCategoryButtons();
+    }
+
+    private void _UpdateCategoryButtons()
+    {
+        if (_globalCatBtn == null || _charCatBtn == null) return;
+        bool isGlobal = BlacklistStore.ActiveCategory == "GLOBAL";
+        _globalCatBtn.ButtonPressed = isGlobal;
+
+        if (isGlobal)
+        {
+            _charCatBtn.Selected = -1;
+        }
+        else
+        {
+            int idx = Array.IndexOf(CharacterDetector.KnownCharacters, BlacklistStore.ActiveCategory);
+            _charCatBtn.Selected = idx;
+        }
     }
 
     private void _HideSelf()
@@ -256,6 +291,7 @@ public partial class BlacklistPanel : CanvasLayer
         _window.AddChild(_vbox);
 
         _BuildTitleBar();
+        _BuildCategoryBar();
         _BuildTabBar();
         _BuildScroll();
         _BuildHintBar();
@@ -323,6 +359,55 @@ public partial class BlacklistPanel : CanvasLayer
         closeBtn.AddThemeFontSizeOverride("font_size", 16);
         closeBtn.Pressed += _HideSelf;
         row.AddChild(closeBtn);
+    }
+
+    private void _BuildCategoryBar()
+    {
+        var catBar = new HBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+        catBar.AddThemeConstantOverride("separation", 6);
+        _vbox.AddChild(catBar);
+
+        _globalCatBtn = _MakeTabButton(_Loc("全局", "Global"), true);
+        _globalCatBtn.Pressed += () =>
+        {
+            BlacklistStore.ActiveCategory = "GLOBAL";
+            _globalCatBtn.ButtonPressed = true;
+            _charCatBtn.Selected = -1;
+            _RefreshContent();
+        };
+        catBar.AddChild(_globalCatBtn);
+
+        _charCatBtn = new OptionButton
+        {
+            CustomMinimumSize = new Vector2(120, 34),
+            ToggleMode = false,
+            SizeFlagsHorizontal = Control.SizeFlags.ShrinkCenter,
+        };
+        _charCatBtn.AddThemeFontSizeOverride("font_size", 15);
+        _charCatBtn.AddThemeColorOverride("font_color", new Color(0.75f, 0.65f, 0.45f, 1f));
+        _charCatBtn.AddThemeColorOverride("font_pressed_color", new Color(1f, 0.92f, 0.6f, 1f));
+        _charCatBtn.AddThemeColorOverride("font_hover_color", new Color(1f, 0.85f, 0.5f, 1f));
+
+        // 填充 5 个角色选项
+        foreach (var charId in CharacterDetector.KnownCharacters)
+        {
+            _charCatBtn.AddItem(CharacterDetector.GetCharacterDisplayName(charId));
+        }
+
+        _charCatBtn.ItemSelected += (index) =>
+        {
+            if (index < 0 || index >= CharacterDetector.KnownCharacters.Length)
+            {
+                _charCatBtn.Selected = -1;
+                return;
+            }
+            var charId = CharacterDetector.KnownCharacters[index];
+            BlacklistStore.ActiveCategory = charId;
+            _globalCatBtn.ButtonPressed = false;
+            _RefreshContent();
+        };
+
+        catBar.AddChild(_charCatBtn);
     }
 
     private void _BuildTabBar()
@@ -698,7 +783,7 @@ public partial class BlacklistPanel : CanvasLayer
     }
 
     private bool _IsBanned(string id) =>
-        _currentTab == Tab.Relics ? BlacklistStore.IsRelicBanned(id) : BlacklistStore.IsPotionBanned(id);
+        _currentTab == Tab.Relics ? BlacklistStore.IsRelicBannedInActive(id) : BlacklistStore.IsPotionBannedInActive(id);
 
     private void _OnCellClicked(ModelCatalog.Entry entry)
     {
@@ -719,7 +804,15 @@ public partial class BlacklistPanel : CanvasLayer
         var title = _Loc("商店黑名单", "Shop Blacklist");
         var relics = _Loc("遗物", "Relics");
         var potions = _Loc("药水", "Potions");
-        _titleLabel.Text = $"  {title}  ·  {relics} {BlacklistStore.RelicCount}/{ModelCatalog.Relics.Count}  {potions} {BlacklistStore.PotionCount}/{ModelCatalog.Potions.Count}";
+
+        // 显示当前分类名
+        string catName;
+        if (BlacklistStore.ActiveCategory == "GLOBAL")
+            catName = _Loc("全局", "Global");
+        else
+            catName = CharacterDetector.GetCharacterDisplayName(BlacklistStore.ActiveCategory);
+
+        _titleLabel.Text = $"  {title} · {catName}  ·  {relics} {BlacklistStore.RelicCount}/{ModelCatalog.Relics.Count}  {potions} {BlacklistStore.PotionCount}/{ModelCatalog.Potions.Count}";
         _hintLabel.Text = _Loc(
             $"  当前页 {bannedInTab}/{totalInTab} 已 ban；F10 切换面板",
             $"  This tab: {bannedInTab}/{totalInTab} banned; F10 toggles panel");
