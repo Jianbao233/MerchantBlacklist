@@ -1,0 +1,25 @@
+Initializing Steam
+=================
+By submitting 'Merchant Blacklist' to the workshop,
+you agree to the Steam Workshop terms of service:
+https://steamcommunity.com/sharedfiles/workshoplegalagreement
+=================
+Logged in as user '「ITK」煎包'.
+Using workshop item ID 3747498557 from mod_id.txt
+Uploading 'Merchant Blacklist' to the steam workshop with item ID 3747498557...
+Status: k_EItemUpdateStatusPreparingContent
+Status: k_EItemUpdateStatusPreparingContent
+Status: k_EItemUpdateStatusUploadingContent
+Status: k_EItemUpdateStatusUploadingContent
+Status: k_EItemUpdateStatusUploadingContent
+Status: k_EItemUpdateStatusUploadingContent, bytes processed: 0/113152 (0.00%)
+Status: k_EItemUpdateStatusUploadingContent, bytes processed: 0/113152 (0.00%)
+Status: k_EItemUpdateStatusUploadingContent, bytes processed: 113152/113152 (100.00%)
+Status: k_EItemUpdateStatusUploadingPreviewFile
+Status: k_EItemUpdateStatusInvalid
+Querying existing app dependencies... 
+No modifications were made to dependencies.
+Applying 1 additional language variant(s)...
+Updating language variant 'schinese'...
+Language variant 'schinese' updated.
+Successfully uploaded 'Merchant Blacklist' to the workshop with id 3747498557! Browsing to the item in Steam.

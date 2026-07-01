@@ -26,6 +26,10 @@ internal static class NativeNodeFactory
     private static MethodInfo _hoverTipRemove;
     private static PropertyInfo _relicHoverTipsProp;
     private static PropertyInfo _potionHoverTipsProp;
+    private static Type _nCardType;
+    private static MethodInfo _nCardCreate;
+    private static Type _cardModelType;
+    private static PropertyInfo _cardHoverTipsProp;
 
     private static bool _resolveAttempted;
     private static bool _ready;
@@ -74,7 +78,16 @@ internal static class NativeNodeFactory
             _relicHoverTipsProp = relicModelType?.GetProperty("HoverTips");
             _potionHoverTipsProp = potionModelType?.GetProperty("HoverTips");
 
-            _ready = _nrelicCreate != null || _npotionCreate != null;
+            _cardModelType = FindType("MegaCrit.Sts2.Core.Models.CardModel");
+            _cardHoverTipsProp = _cardModelType?.GetProperty("HoverTips");
+
+            _nCardType = FindType("MegaCrit.Sts2.Core.Nodes.Cards.NCard");
+            if (_nCardType != null)
+            {
+                _nCardCreate = _nCardType.GetMethod("Create", BindingFlags.Public | BindingFlags.Static);
+            }
+
+            _ready = _nrelicCreate != null || _npotionCreate != null || _nCardCreate != null;
             return _ready;
         }
         catch (Exception ex)
@@ -113,6 +126,22 @@ internal static class NativeNodeFactory
         }
     }
 
+    public static Control TryCreateCard(object cardModel)
+    {
+        if (!EnsureResolved() || _nCardCreate == null || cardModel == null) return null;
+        try
+        {
+            // NCard.Create(CardModel card, ModelVisibility visibility = ModelVisibility.Visible)
+            // 尝试只传一个参数
+            return _nCardCreate.Invoke(null, new[] { cardModel }) as Control;
+        }
+        catch (Exception ex)
+        {
+            MerchantBlacklistLog.Warn($"NCard.Create failed: {ex.Message}");
+            return null;
+        }
+    }
+
     public static IDisposable ShowHoverTip(Control owner, object model, bool isRelic)
     {
         if (!EnsureResolved() || _hoverTipCreateAndShow == null || owner == null || model == null) return null;
@@ -143,6 +172,30 @@ internal static class NativeNodeFactory
         catch (Exception ex)
         {
             MerchantBlacklistLog.Warn($"ShowHoverTip failed: {ex.Message}");
+            return null;
+        }
+    }
+
+    public static IDisposable ShowHoverTipForCard(Control owner, object cardModel)
+    {
+        if (!EnsureResolved() || _hoverTipCreateAndShow == null || owner == null || cardModel == null) return null;
+        try
+        {
+            RemoveActiveHoverTip(owner);
+
+            var hoverTips = _cardHoverTipsProp?.GetValue(cardModel);
+            if (hoverTips == null) return null;
+
+            var alignment = Enum.Parse(_hoverTipAlignmentType, "Right");
+            var tipObj = _hoverTipCreateAndShow.Invoke(null, new[] { owner, hoverTips, alignment });
+
+            ReparentTipToOwnerLayer(tipObj as Control, owner);
+
+            return new HoverTipHandle(owner);
+        }
+        catch (Exception ex)
+        {
+            MerchantBlacklistLog.Warn($"ShowHoverTipForCard failed: {ex.Message}");
             return null;
         }
     }

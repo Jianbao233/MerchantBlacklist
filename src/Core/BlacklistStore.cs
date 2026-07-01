@@ -8,7 +8,7 @@ using System.Text.Json.Serialization;
 namespace MerchantBlacklist.Core;
 
 /// <summary>
-/// 黑名单持久化存储（v0.2.0 两层结构）：全局 + 5 角色两层扁平列表。
+/// 黑名单持久化存储（v0.3.0 三层结构（遗物 + 药水 + 卡牌））：全局 + 5 角色两层扁平列表。
 /// 路径：%APPDATA%\SlayTheSpire2\mods_settings\MerchantBlacklist.json
 ///
 /// IsRelicBanned(id) = GlobalRelics.Contains(id) ∪ CurrentCharacterRelics.Contains(id)
@@ -17,7 +17,7 @@ namespace MerchantBlacklist.Core;
 /// </summary>
 internal static class BlacklistStore
 {
-    private const int CurrentSchemaVersion = 3;
+    private const int CurrentSchemaVersion = 4;
     private const int DefaultMaxRerollAttempts = 12;
     private const string GlobalCategory = "GLOBAL";
 
@@ -26,10 +26,12 @@ internal static class BlacklistStore
     // 全局层
     private static readonly HashSet<string> _globalRelics = new(StringComparer.Ordinal);
     private static readonly HashSet<string> _globalPotions = new(StringComparer.Ordinal);
+    private static readonly HashSet<string> _globalCards = new(StringComparer.Ordinal);
 
     // 角色层：key = "IRONCLAD" 等
     private static readonly Dictionary<string, HashSet<string>> _perCharRelics = new(StringComparer.Ordinal);
     private static readonly Dictionary<string, HashSet<string>> _perCharPotions = new(StringComparer.Ordinal);
+    private static readonly Dictionary<string, HashSet<string>> _perCharCards = new(StringComparer.Ordinal);
 
     /// <summary>面板当前编辑的分类："GLOBAL" 或角色 ID。</summary>
     public static string ActiveCategory { get; set; } = GlobalCategory;
@@ -45,6 +47,7 @@ internal static class BlacklistStore
         {
             _perCharRelics[charId] = new HashSet<string>(StringComparer.Ordinal);
             _perCharPotions[charId] = new HashSet<string>(StringComparer.Ordinal);
+            _perCharCards[charId] = new HashSet<string>(StringComparer.Ordinal);
         }
     }
 
@@ -71,6 +74,19 @@ internal static class BlacklistStore
             if (_globalPotions.Contains(entryId)) return true;
             var charId = CharacterDetector.GetCurrentCharacterId();
             if (charId != null && _perCharPotions.TryGetValue(charId, out var set) && set.Contains(entryId))
+                return true;
+            return false;
+        }
+    }
+
+    public static bool IsCardBanned(string entryId)
+    {
+        if (string.IsNullOrEmpty(entryId)) return false;
+        lock (_gate)
+        {
+            if (_globalCards.Contains(entryId)) return true;
+            var charId = CharacterDetector.GetCurrentCharacterId();
+            if (charId != null && _perCharCards.TryGetValue(charId, out var set) && set.Contains(entryId))
                 return true;
             return false;
         }
@@ -105,6 +121,17 @@ internal static class BlacklistStore
         }
     }
 
+    public static bool IsCardBannedInActive(string entryId)
+    {
+        if (string.IsNullOrEmpty(entryId)) return false;
+        lock (_gate)
+        {
+            if (GetActiveCardSet().Contains(entryId)) return true;
+            if (ActiveCategory != "GLOBAL" && _globalCards.Contains(entryId)) return true;
+            return false;
+        }
+    }
+
     public static bool ToggleRelic(string entryId)
     {
         if (string.IsNullOrEmpty(entryId)) return false;
@@ -133,6 +160,20 @@ internal static class BlacklistStore
         return nowBanned;
     }
 
+    public static bool ToggleCard(string entryId)
+    {
+        if (string.IsNullOrEmpty(entryId)) return false;
+        bool nowBanned;
+        lock (_gate)
+        {
+            var set = GetActiveCardSet();
+            nowBanned = set.Add(entryId);
+            if (!nowBanned) set.Remove(entryId);
+        }
+        SaveToDisk();
+        return nowBanned;
+    }
+
     public static bool AddRelic(string entryId)
     {
         if (string.IsNullOrEmpty(entryId)) return false;
@@ -147,6 +188,15 @@ internal static class BlacklistStore
         if (string.IsNullOrEmpty(entryId)) return false;
         bool added;
         lock (_gate) added = GetActivePotionSet().Add(entryId);
+        if (added) SaveToDisk();
+        return added;
+    }
+
+    public static bool AddCard(string entryId)
+    {
+        if (string.IsNullOrEmpty(entryId)) return false;
+        bool added;
+        lock (_gate) added = GetActiveCardSet().Add(entryId);
         if (added) SaveToDisk();
         return added;
     }
@@ -175,6 +225,18 @@ internal static class BlacklistStore
         SaveToDisk();
     }
 
+    public static void SetCards(IEnumerable<string> ids)
+    {
+        lock (_gate)
+        {
+            var set = GetActiveCardSet();
+            set.Clear();
+            foreach (var id in ids ?? Enumerable.Empty<string>())
+                if (!string.IsNullOrEmpty(id)) set.Add(id);
+        }
+        SaveToDisk();
+    }
+
     public static void ClearRelics()
     {
         lock (_gate) GetActiveRelicSet().Clear();
@@ -184,6 +246,12 @@ internal static class BlacklistStore
     public static void ClearPotions()
     {
         lock (_gate) GetActivePotionSet().Clear();
+        SaveToDisk();
+    }
+
+    public static void ClearCards()
+    {
+        lock (_gate) GetActiveCardSet().Clear();
         SaveToDisk();
     }
 
@@ -199,6 +267,11 @@ internal static class BlacklistStore
         lock (_gate) return GetActivePotionSet().ToArray();
     }
 
+    public static IReadOnlyCollection<string> SnapshotCards()
+    {
+        lock (_gate) return GetActiveCardSet().ToArray();
+    }
+
     public static int RelicCount
     {
         get { lock (_gate) return GetActiveRelicSet().Count; }
@@ -207,6 +280,11 @@ internal static class BlacklistStore
     public static int PotionCount
     {
         get { lock (_gate) return GetActivePotionSet().Count; }
+    }
+
+    public static int CardCount
+    {
+        get { lock (_gate) return GetActiveCardSet().Count; }
     }
 
     /// <summary>全局层遗物 ban 数。</summary>
@@ -220,6 +298,11 @@ internal static class BlacklistStore
         get { lock (_gate) return _globalPotions.Count; }
     }
 
+    public static int GlobalCardCount
+    {
+        get { lock (_gate) return _globalCards.Count; }
+    }
+
     /// <summary>指定角色层遗物 ban 数。</summary>
     public static int CharacterRelicCount(string charId)
     {
@@ -229,6 +312,11 @@ internal static class BlacklistStore
     public static int CharacterPotionCount(string charId)
     {
         lock (_gate) return _perCharPotions.TryGetValue(charId, out var s) ? s.Count : 0;
+    }
+
+    public static int CharacterCardCount(string charId)
+    {
+        lock (_gate) return _perCharCards.TryGetValue(charId, out var s) ? s.Count : 0;
     }
 
     // ── 内部工具 ─────────────────────────────────────────────────────
@@ -250,6 +338,15 @@ internal static class BlacklistStore
         if (_perCharPotions.TryGetValue(ActiveCategory, out var set))
             return set;
         return _globalPotions;
+    }
+
+    private static HashSet<string> GetActiveCardSet()
+    {
+        if (ActiveCategory == GlobalCategory || ActiveCategory == null)
+            return _globalCards;
+        if (_perCharCards.TryGetValue(ActiveCategory, out var set))
+            return set;
+        return _globalCards;
     }
 
     // ── 持久化 ───────────────────────────────────────────────────────
@@ -285,10 +382,12 @@ internal static class BlacklistStore
             {
                 _globalRelics.Clear();
                 _globalPotions.Clear();
+                _globalCards.Clear();
                 foreach (var charId in CharacterDetector.KnownCharacters)
                 {
                     _perCharRelics[charId].Clear();
                     _perCharPotions[charId].Clear();
+                    _perCharCards[charId].Clear();
                 }
 
                 if (schemaVersion >= 3)
@@ -328,6 +427,9 @@ internal static class BlacklistStore
             if (globalEl.TryGetProperty("potions", out var potionsEl))
                 foreach (var id in potionsEl.EnumerateArray())
                     if (!string.IsNullOrEmpty(id.GetString())) _globalPotions.Add(id.GetString());
+            if (globalEl.TryGetProperty("cards", out var cardsEl))
+                foreach (var id in cardsEl.EnumerateArray())
+                    if (!string.IsNullOrEmpty(id.GetString())) _globalCards.Add(id.GetString());
         }
 
         if (root.TryGetProperty("perCharacter", out var perCharEl))
@@ -342,6 +444,9 @@ internal static class BlacklistStore
                     if (charEl.TryGetProperty("potions", out var potionsEl))
                         foreach (var id in potionsEl.EnumerateArray())
                             if (!string.IsNullOrEmpty(id.GetString())) _perCharPotions[charId].Add(id.GetString());
+                    if (charEl.TryGetProperty("cards", out var cardsEl))
+                        foreach (var id in cardsEl.EnumerateArray())
+                            if (!string.IsNullOrEmpty(id.GetString())) _perCharCards[charId].Add(id.GetString());
                 }
             }
         }
@@ -372,6 +477,7 @@ internal static class BlacklistStore
                     {
                         Relics = _globalRelics.OrderBy(x => x, StringComparer.Ordinal).ToList(),
                         Potions = _globalPotions.OrderBy(x => x, StringComparer.Ordinal).ToList(),
+                        Cards = _globalCards.OrderBy(x => x, StringComparer.Ordinal).ToList(),
                     },
                     PerCharacter = new Dictionary<string, CategoryDto>(StringComparer.Ordinal),
                     Settings = new BlacklistSettingsDto
@@ -389,6 +495,7 @@ internal static class BlacklistStore
                     {
                         Relics = _perCharRelics[charId].OrderBy(x => x, StringComparer.Ordinal).ToList(),
                         Potions = _perCharPotions[charId].OrderBy(x => x, StringComparer.Ordinal).ToList(),
+                        Cards = _perCharCards[charId].OrderBy(x => x, StringComparer.Ordinal).ToList(),
                     };
                 }
 
@@ -429,6 +536,9 @@ internal static class BlacklistStore
 
         [JsonPropertyName("potions")]
         public List<string> Potions { get; set; }
+
+        [JsonPropertyName("cards")]
+        public List<string> Cards { get; set; }
     }
 
     private sealed class BlacklistSettingsDto

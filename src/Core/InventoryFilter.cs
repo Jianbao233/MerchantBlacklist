@@ -43,6 +43,16 @@ internal static class InventoryFilter
     private static MethodInfo _calcCostMethod;
     private static MethodInfo _markPotionSeenMethod;
 
+    private static Type _merchantCardEntryType;
+    private static Type _cardModelType;
+    private static Type _cardCreationResultType;
+    private static PropertyInfo _characterCardEntriesProp;
+    private static PropertyInfo _colorlessCardEntriesProp;
+    private static PropertyInfo _cardEntryCreationResultProp;
+    private static PropertyInfo _creationResultCardProp;
+    private static PropertyInfo _cardModelIdProp;
+    private static MethodInfo _cardPopulateMethod;
+
     private static bool _initialized;
     private static bool _initFailed;
 
@@ -122,6 +132,16 @@ internal static class InventoryFilter
                 _markPotionSeenMethod = saveManagerType.GetMethod("MarkPotionAsSeen", BindingFlags.Public | BindingFlags.Instance);
             }
 
+            _merchantCardEntryType = FindType("MegaCrit.Sts2.Core.Entities.Merchant.MerchantCardEntry");
+            _cardModelType = FindType("MegaCrit.Sts2.Core.Models.CardModel");
+            _cardCreationResultType = FindType("MegaCrit.Sts2.Core.Entities.Cards.CardCreationResult");
+            _characterCardEntriesProp = _merchantInventoryType.GetProperty("CharacterCardEntries");
+            _colorlessCardEntriesProp = _merchantInventoryType.GetProperty("ColorlessCardEntries");
+            _cardEntryCreationResultProp = _merchantCardEntryType?.GetProperty("CreationResult");
+            _creationResultCardProp = _cardCreationResultType?.GetProperty("Card");
+            _cardModelIdProp = FindAbstractProp(_cardModelType, "Id") ?? _cardModelType?.GetProperty("Id");
+            _cardPopulateMethod = _merchantCardEntryType?.GetMethod("Populate", BindingFlags.Public | BindingFlags.Instance);
+
             _initialized = true;
             return true;
         }
@@ -142,6 +162,7 @@ internal static class InventoryFilter
         {
             FilterRelics(inventory);
             FilterPotions(inventory);
+            FilterCards(inventory);
         }
         catch (Exception ex)
         {
@@ -356,6 +377,60 @@ internal static class InventoryFilter
         if (entry == null) return null;
         var model = _potionEntryModelProp?.GetValue(entry);
         return GetEntryIdFromModel(model);
+    }
+
+    private static void FilterCards(object inventory)
+    {
+        if (_merchantCardEntryType == null || _cardPopulateMethod == null) return;
+
+        // 合并 CharacterCardEntries + ColorlessCardEntries
+        var charCards = _characterCardEntriesProp?.GetValue(inventory) as IList;
+        var colorlessCards = _colorlessCardEntriesProp?.GetValue(inventory) as IList;
+
+        FilterCardList(charCards);
+        FilterCardList(colorlessCards);
+    }
+
+    private static void FilterCardList(IList entries)
+    {
+        if (entries == null || entries.Count == 0) return;
+
+        for (int i = 0; i < entries.Count; i++)
+        {
+            var entry = entries[i];
+            var cardId = GetEntryIdFromCard(entry);
+            if (string.IsNullOrEmpty(cardId)) continue;
+            if (!BlacklistStore.IsCardBanned(cardId)) continue;
+
+            // 被 ban，重抽
+            bool rerolled = false;
+            for (int attempt = 0; attempt < BlacklistStore.MaxRerollAttempts; attempt++)
+            {
+                _cardPopulateMethod?.Invoke(entry, null);
+                var newId = GetEntryIdFromCard(entry);
+                if (string.IsNullOrEmpty(newId)) break;
+                if (!BlacklistStore.IsCardBanned(newId))
+                {
+                    MerchantBlacklistLog.Info($"Card banned '{cardId}' -> '{newId}'.");
+                    rerolled = true;
+                    break;
+                }
+            }
+            if (!rerolled)
+            {
+                MerchantBlacklistLog.Info($"Card '{cardId}' kept (no replacement available, keep_original).");
+            }
+        }
+    }
+
+    private static string GetEntryIdFromCard(object entry)
+    {
+        if (entry == null) return null;
+        var creationResult = _cardEntryCreationResultProp?.GetValue(entry);
+        if (creationResult == null) return null;
+        var card = _creationResultCardProp?.GetValue(creationResult);
+        if (card == null) return null;
+        return GetEntryIdFromModel(card);
     }
 
     private static string GetEntryIdFromModel(object model)

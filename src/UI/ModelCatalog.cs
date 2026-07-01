@@ -20,15 +20,19 @@ internal static class ModelCatalog
         public string Rarity;
         public int RarityOrder;
         public object RawModel;
+        public string CardType;
+        public string PoolName;
     }
 
     private static List<Entry> _relics;
     private static List<Entry> _potions;
+    private static List<Entry> _cards;
     private static bool _resolved;
 
     private static Type _modelDbType;
     private static Type _relicModelType;
     private static Type _potionModelType;
+    private static Type _cardModelType;
     private static Type _modelIdType;
     private static Type _locStringType;
 
@@ -42,9 +46,14 @@ internal static class ModelCatalog
         get { EnsureBuilt(); return _potions ?? (IReadOnlyList<Entry>)Array.Empty<Entry>(); }
     }
 
+    public static IReadOnlyList<Entry> Cards
+    {
+        get { EnsureBuilt(); return _cards ?? (IReadOnlyList<Entry>)Array.Empty<Entry>(); }
+    }
+
     public static void EnsureBuilt()
     {
-        if (_relics != null && _potions != null) return;
+        if (_relics != null && _potions != null && _cards != null) return;
         try { Build(); }
         catch (Exception ex) { MerchantBlacklistLog.Error($"ModelCatalog build failed: {ex.Message}"); }
     }
@@ -53,6 +62,7 @@ internal static class ModelCatalog
     {
         _relics = null;
         _potions = null;
+        _cards = null;
     }
 
     private static void Build()
@@ -61,6 +71,7 @@ internal static class ModelCatalog
 
         var allRelicsProp = _modelDbType.GetProperty("AllRelics", BindingFlags.Public | BindingFlags.Static);
         var allPotionsProp = _modelDbType.GetProperty("AllPotions", BindingFlags.Public | BindingFlags.Static);
+        var allCardsProp = _modelDbType.GetProperty("AllCards", BindingFlags.Public | BindingFlags.Static);
         if (allRelicsProp == null || allPotionsProp == null)
         {
             MerchantBlacklistLog.Warn("ModelDb.AllRelics/AllPotions not found.");
@@ -69,9 +80,10 @@ internal static class ModelCatalog
 
         _relics = BuildRelicEntries(allRelicsProp.GetValue(null) as IEnumerable);
         _potions = BuildPotionEntries(allPotionsProp.GetValue(null) as IEnumerable);
+        _cards = BuildCardEntries(allCardsProp?.GetValue(null) as IEnumerable);
         _resolved = true;
 
-        MerchantBlacklistLog.Info($"ModelCatalog ready. relics={_relics.Count}, potions={_potions.Count}.");
+        MerchantBlacklistLog.Info($"ModelCatalog ready. relics={_relics.Count}, potions={_potions.Count}, cards={_cards.Count}.");
     }
 
     private static bool ResolveTypes()
@@ -81,10 +93,11 @@ internal static class ModelCatalog
         _modelDbType = FindType("MegaCrit.Sts2.Core.Models.ModelDb");
         _relicModelType = FindType("MegaCrit.Sts2.Core.Models.RelicModel");
         _potionModelType = FindType("MegaCrit.Sts2.Core.Models.PotionModel");
+        _cardModelType = FindType("MegaCrit.Sts2.Core.Models.CardModel");
         _modelIdType = FindType("MegaCrit.Sts2.Core.Models.ModelId");
         _locStringType = FindType("MegaCrit.Sts2.Core.Localization.LocString");
 
-        return _modelDbType != null && _relicModelType != null && _potionModelType != null && _modelIdType != null;
+        return _modelDbType != null && _relicModelType != null && _potionModelType != null && _cardModelType != null && _modelIdType != null;
     }
 
     private static List<Entry> BuildRelicEntries(IEnumerable models)
@@ -191,6 +204,80 @@ internal static class ModelCatalog
         return list;
     }
 
+    private static List<Entry> BuildCardEntries(IEnumerable models)
+    {
+        var list = new List<Entry>();
+        if (models == null || _cardModelType == null) return list;
+
+        var idProp = _cardModelType.GetProperty("Id");
+        var titleProp = _cardModelType.GetProperty("TitleLocString");
+        var rarityProp = _cardModelType.GetProperty("Rarity");
+        var typeProp = _cardModelType.GetProperty("Type");
+        var poolProp = _cardModelType.GetProperty("Pool");
+        var entryProp = _modelIdType.GetProperty("Entry");
+
+        foreach (var model in models)
+        {
+            if (model == null) continue;
+            try
+            {
+                var idObj = idProp?.GetValue(model);
+                var entryId = entryProp?.GetValue(idObj) as string;
+                if (string.IsNullOrEmpty(entryId)) continue;
+
+                var pool = poolProp?.GetValue(model);
+                if (pool == null) continue;
+
+                var poolType = pool.GetType().Name;
+
+                // 排除非商店池：Curse / Event / Status / Token / Quest / Deprecated
+                if (poolType.Contains("Curse") || poolType.Contains("Event") ||
+                    poolType.Contains("Status") || poolType.Contains("Token") ||
+                    poolType.Contains("Quest") || poolType.Contains("Deprecated"))
+                    continue;
+
+                // 角色卡和无色卡都保留；非商店池已上面排除。
+
+                var poolTitleProp = pool.GetType().GetProperty("Title");
+                var poolName = poolTitleProp?.GetValue(pool)?.ToString() ?? string.Empty;
+
+                var rarity = rarityProp?.GetValue(model);
+                var rarityName = rarity?.ToString() ?? string.Empty;
+
+                var cardTypeVal = typeProp?.GetValue(model);
+                var cardTypeName = cardTypeVal?.ToString() ?? "Unknown";
+
+                list.Add(new Entry
+                {
+                    Id = entryId,
+                    Title = ResolveLocText(titleProp?.GetValue(model)) ?? entryId,
+                    Icon = null,
+                    Rarity = rarityName,
+                    RarityOrder = RarityOrderCard(rarityName),
+                    RawModel = model,
+                    CardType = cardTypeName,
+                    PoolName = poolName,
+                });
+            }
+            catch (Exception ex)
+            {
+                MerchantBlacklistLog.Warn($"Skip card model: {ex.Message}");
+            }
+        }
+
+        // 排序：角色卡在前，无色卡在后，再按 RarityOrder，再按 Id
+        list.Sort((a, b) =>
+        {
+            var aColorless = a.PoolName != null && a.PoolName.Contains("Colorless");
+            var bColorless = b.PoolName != null && b.PoolName.Contains("Colorless");
+            var c = aColorless.CompareTo(bColorless);
+            if (c != 0) return c;
+            c = a.RarityOrder.CompareTo(b.RarityOrder);
+            return c != 0 ? c : string.Compare(a.Id, b.Id, StringComparison.Ordinal);
+        });
+        return list;
+    }
+
     private static Texture2D SafeLoadTexture(PropertyInfo prop, object model)
     {
         if (prop == null || model == null) return null;
@@ -231,6 +318,15 @@ internal static class ModelCatalog
         "Common" => 0,
         "Uncommon" => 1,
         "Rare" => 2,
+        _ => 9,
+    };
+
+    private static int RarityOrderCard(string rarity) => rarity switch
+    {
+        "Common" => 0,
+        "Uncommon" => 1,
+        "Rare" => 2,
+        "Shop" => 3,
         _ => 9,
     };
 

@@ -47,9 +47,26 @@ internal static class ShopRightClickBanPotionPatch
     }
 }
 
+[HarmonyPatch]
+internal static class ShopRightClickBanCardPatch
+{
+    private static MethodBase TargetMethod()
+    {
+        var t = AccessTools.TypeByName("MegaCrit.Sts2.Core.Nodes.Screens.Shops.NMerchantCard");
+        return t?.GetMethod("_Ready", AccessTools.all);
+    }
+
+    [HarmonyPostfix]
+    private static void Postfix(object __instance)
+    {
+        if (__instance is not Node node) return;
+        ShopRightClickBanShared.AttachHitboxListener(node, isRelic: false, isCard: true);
+    }
+}
+
 internal static class ShopRightClickBanShared
 {
-    public static void AttachHitboxListener(Node slotNode, bool isRelic)
+    public static void AttachHitboxListener(Node slotNode, bool isRelic, bool isCard = false)
     {
         try
         {
@@ -59,7 +76,7 @@ internal static class ShopRightClickBanShared
             var sigName = ResolveMousePressedSignalName(hitbox);
             if (string.IsNullOrEmpty(sigName)) return;
 
-            Action<InputEvent> handler = ev => OnMousePressed(slotNode, ev, isRelic);
+            Action<InputEvent> handler = ev => OnMousePressed(slotNode, ev, isRelic, isCard);
             var callable = Callable.From(handler);
             hitbox.Connect(sigName, callable);
         }
@@ -93,7 +110,7 @@ internal static class ShopRightClickBanShared
         return "MousePressed";
     }
 
-    private static void OnMousePressed(Node slotNode, InputEvent ev, bool isRelic)
+    private static void OnMousePressed(Node slotNode, InputEvent ev, bool isRelic, bool isCard = false)
     {
         if (ev is not InputEventMouseButton mb) return;
         if (!mb.Pressed) return;
@@ -108,12 +125,16 @@ internal static class ShopRightClickBanShared
 
         try
         {
-            var entryId = ResolveEntryId(slotNode, isRelic);
+            var entryId = ResolveEntryId(slotNode, isRelic, isCard);
             if (string.IsNullOrEmpty(entryId)) return;
 
-            bool added = isRelic
-                ? BlacklistStore.AddRelic(entryId)
-                : BlacklistStore.AddPotion(entryId);
+            bool added;
+            if (isCard)
+                added = BlacklistStore.AddCard(entryId);
+            else if (isRelic)
+                added = BlacklistStore.AddRelic(entryId);
+            else
+                added = BlacklistStore.AddPotion(entryId);
 
             if (!added)
             {
@@ -143,11 +164,27 @@ internal static class ShopRightClickBanShared
         };
     }
 
-    private static string ResolveEntryId(Node slotNode, bool isRelic)
+    private static string ResolveEntryId(Node slotNode, bool isRelic, bool isCard = false)
     {
         var entryProp = slotNode.GetType().GetProperty("Entry", BindingFlags.Public | BindingFlags.Instance);
         var entry = entryProp?.GetValue(slotNode);
         if (entry == null) return null;
+
+        if (isCard)
+        {
+            // 卡牌 entry 的 Model 不直接是 CardModel，而是 CreationResult.Card
+            var creationResultProp = entry.GetType().GetProperty("CreationResult");
+            var creationResult = creationResultProp?.GetValue(entry);
+            if (creationResult == null) return null;
+            var cardProp = creationResult.GetType().GetProperty("Card");
+            var card = cardProp?.GetValue(creationResult);
+            if (card == null) return null;
+            var cardIdProp = card.GetType().GetProperty("Id");
+            var cardIdObj = cardIdProp?.GetValue(card);
+            if (cardIdObj == null) return null;
+            var cardEntryProp = cardIdObj.GetType().GetProperty("Entry");
+            return cardEntryProp?.GetValue(cardIdObj) as string;
+        }
 
         var modelProp = entry.GetType().GetProperty("Model");
         var model = modelProp?.GetValue(entry);

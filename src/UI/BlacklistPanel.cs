@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Reflection;
 using Godot;
 using MerchantBlacklist.Core;
@@ -31,11 +32,12 @@ public partial class BlacklistPanel : CanvasLayer
 
     private static readonly string[] RelicGroups = { "Common", "Uncommon", "Rare", "Shop" };
     private static readonly string[] PotionGroups = { "Common", "Uncommon", "Rare" };
+    private static readonly string[] CardGroups = { "Common", "Uncommon", "Rare", "Shop" };
 
     [Flags]
     private enum ResizeEdge { None = 0, Left = 1, Right = 2, Top = 4, Bottom = 8 }
 
-    private enum Tab { Relics, Potions }
+    private enum Tab { Relics, Potions, Cards }
 
     private static BlacklistPanel _instance;
 
@@ -80,6 +82,11 @@ public partial class BlacklistPanel : CanvasLayer
     private ScrollContainer _scroll;
     private Button _relicTabBtn;
     private Button _potionTabBtn;
+    private Button _cardTabBtn;
+    private LineEdit _cardSearchBox;
+    private OptionButton _cardTypeFilter;
+    private string _cardSearchText = "";
+    private int _cardTypeFilterIndex = 0; // 0=全部, 1=攻击, 2=技能, 3=能力
     private Button _globalCatBtn;
     private OptionButton _charCatBtn;
     private Tab _currentTab = Tab.Relics;
@@ -418,12 +425,14 @@ public partial class BlacklistPanel : CanvasLayer
 
         _relicTabBtn = _MakeTabButton(_Loc("遗物", "Relics"), _currentTab == Tab.Relics);
         _potionTabBtn = _MakeTabButton(_Loc("药水", "Potions"), _currentTab == Tab.Potions);
+        _cardTabBtn = _MakeTabButton(_Loc("卡牌", "Cards"), _currentTab == Tab.Cards);
 
         _relicTabBtn.Pressed += () =>
         {
             _currentTab = Tab.Relics;
             _relicTabBtn.ButtonPressed = true;
             _potionTabBtn.ButtonPressed = false;
+            _cardTabBtn.ButtonPressed = false;
             _RefreshContent();
         };
         _potionTabBtn.Pressed += () =>
@@ -431,11 +440,21 @@ public partial class BlacklistPanel : CanvasLayer
             _currentTab = Tab.Potions;
             _relicTabBtn.ButtonPressed = false;
             _potionTabBtn.ButtonPressed = true;
+            _cardTabBtn.ButtonPressed = false;
+            _RefreshContent();
+        };
+        _cardTabBtn.Pressed += () =>
+        {
+            _currentTab = Tab.Cards;
+            _relicTabBtn.ButtonPressed = false;
+            _potionTabBtn.ButtonPressed = false;
+            _cardTabBtn.ButtonPressed = true;
             _RefreshContent();
         };
 
         tabs.AddChild(_relicTabBtn);
         tabs.AddChild(_potionTabBtn);
+        tabs.AddChild(_cardTabBtn);
     }
 
     private Button _MakeTabButton(string text, bool active)
@@ -492,6 +511,12 @@ public partial class BlacklistPanel : CanvasLayer
     private void _RefreshContent()
     {
         if (_content == null) return;
+
+        if (_currentTab == Tab.Cards)
+        {
+            _RefreshCardContent();
+            return;
+        }
 
         foreach (var child in _content.GetChildren())
         {
@@ -597,7 +622,15 @@ public partial class BlacklistPanel : CanvasLayer
     private void _OnGroupBulk(List<ModelCatalog.Entry> list, bool ban)
     {
         bool changed = false;
-        if (_currentTab == Tab.Relics)
+        if (_currentTab == Tab.Cards)
+        {
+            foreach (var e in list)
+            {
+                if (ban) changed |= BlacklistStore.AddCard(e.Id);
+                else changed |= _RemoveCard(e.Id);
+            }
+        }
+        else if (_currentTab == Tab.Relics)
         {
             foreach (var e in list)
             {
@@ -628,6 +661,311 @@ public partial class BlacklistPanel : CanvasLayer
         if (!BlacklistStore.IsPotionBanned(id)) return false;
         BlacklistStore.TogglePotion(id);
         return true;
+    }
+
+    private static bool _RemoveCard(string id)
+    {
+        if (!BlacklistStore.IsCardBanned(id)) return false;
+        BlacklistStore.ToggleCard(id);
+        return true;
+    }
+
+    // ── 卡牌 Tab 内容 ──────────────────────────────────────────────────
+    private void _RefreshCardContent()
+    {
+        if (_content == null) return;
+
+        foreach (var child in _content.GetChildren())
+            child.QueueFree();
+
+        ModelCatalog.EnsureBuilt();
+        var entries = ModelCatalog.Cards;
+
+        // 构建工具栏
+        var toolbar = new HBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+        toolbar.AddThemeConstantOverride("separation", 8);
+        _content.AddChild(toolbar);
+
+        var searchLabel = new Label { Text = _Loc("搜索:", "Search:") };
+        searchLabel.AddThemeFontSizeOverride("font_size", 13);
+        searchLabel.AddThemeColorOverride("font_color", new Color(0.6f, 0.55f, 0.42f, 1f));
+        toolbar.AddChild(searchLabel);
+
+        _cardSearchBox = new LineEdit
+        {
+            CustomMinimumSize = new Vector2(180, 30),
+            PlaceholderText = _Loc("卡牌名称或 ID", "Card name or ID"),
+            Text = _cardSearchText,
+        };
+        _cardSearchBox.TextChanged += (text) =>
+        {
+            _cardSearchText = text;
+            _RefreshCardContent();
+        };
+        toolbar.AddChild(_cardSearchBox);
+
+        _cardTypeFilter = new OptionButton { CustomMinimumSize = new Vector2(100, 30) };
+        _cardTypeFilter.AddItem(_Loc("全部", "All"));
+        _cardTypeFilter.AddItem(_Loc("攻击", "Attack"));
+        _cardTypeFilter.AddItem(_Loc("技能", "Skill"));
+        _cardTypeFilter.AddItem(_Loc("能力", "Power"));
+        _cardTypeFilter.Selected = _cardTypeFilterIndex;
+        _cardTypeFilter.ItemSelected += (index) =>
+        {
+            _cardTypeFilterIndex = (int)index;
+            _RefreshCardContent();
+        };
+        toolbar.AddChild(_cardTypeFilter);
+
+        // 过滤
+        var filtered = new List<ModelCatalog.Entry>();
+        foreach (var e in entries)
+        {
+            // 搜索过滤
+            if (!string.IsNullOrEmpty(_cardSearchText))
+            {
+                bool match = (e.Title?.Contains(_cardSearchText, StringComparison.OrdinalIgnoreCase) == true)
+                          || (e.Id?.Contains(_cardSearchText, StringComparison.OrdinalIgnoreCase) == true);
+                if (!match) continue;
+            }
+            // 类型过滤
+            if (_cardTypeFilterIndex > 0)
+            {
+                string expected = _cardTypeFilterIndex switch { 1 => "Attack", 2 => "Skill", 3 => "Power", _ => null };
+                if (e.CardType != expected) continue;
+            }
+            filtered.Add(e);
+        }
+
+        // 按池分组：角色卡 vs 无色卡
+        var charCards = filtered.Where(e => !IsColorlessPool(e.PoolName)).ToList();
+        var colorlessCards = filtered.Where(e => IsColorlessPool(e.PoolName)).ToList();
+
+        int totalBanned = 0;
+
+        // 角色卡分组
+        if (charCards.Count > 0)
+        {
+            totalBanned += _BuildCardSection(_Loc("角色卡", "Character Cards"), charCards);
+        }
+
+        // 无色卡分组
+        if (colorlessCards.Count > 0)
+        {
+            if (charCards.Count > 0)
+            {
+                _content.AddChild(new ColorRect
+                {
+                    Color = new Color(0.55f, 0.42f, 0.22f, 0.2f),
+                    CustomMinimumSize = new Vector2(0, 1),
+                    MouseFilter = Control.MouseFilterEnum.Ignore,
+                });
+            }
+            totalBanned += _BuildCardSection(_Loc("无色卡", "Colorless Cards"), colorlessCards);
+        }
+
+        _UpdateTitleAndHint(totalBanned, filtered.Count);
+    }
+
+    private static bool IsColorlessPool(string poolName)
+    {
+        if (string.IsNullOrEmpty(poolName)) return false;
+        return poolName.Contains("Colorless") || poolName.Contains("无色");
+    }
+
+    private int _BuildCardSection(string title, List<ModelCatalog.Entry> list)
+    {
+        int sectionBanned = 0;
+
+        var sectionVBox = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+        sectionVBox.AddThemeConstantOverride("separation", 6);
+        _content.AddChild(sectionVBox);
+
+        var header = new Label
+        {
+            Text = $"  {title}  ({list.Count})",
+            SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+        };
+        header.AddThemeColorOverride("font_color", new Color(0.75f, 0.65f, 0.45f, 1f));
+        header.AddThemeFontSizeOverride("font_size", 16);
+        sectionVBox.AddChild(header);
+
+        // 按稀有度分组
+        foreach (var rarity in CardGroups)
+        {
+            var group = list.Where(e => e.Rarity == rarity).ToList();
+            if (group.Count == 0) continue;
+
+            int bannedHere = group.Count(e => _IsCardBanned(e.Id));
+            sectionBanned += bannedHere;
+
+            var groupLabel = new Label
+            {
+                Text = $"  {_LocRarity(rarity)}  ·  {bannedHere}/{group.Count}",
+            };
+            groupLabel.AddThemeColorOverride("font_color", _RarityColor(rarity));
+            groupLabel.AddThemeFontSizeOverride("font_size", 14);
+            sectionVBox.AddChild(groupLabel);
+
+            foreach (var entry in group)
+            {
+                sectionVBox.AddChild(_MakeCardRow(entry, _IsCardBanned(entry.Id)));
+            }
+        }
+
+        return sectionBanned;
+    }
+
+    private Control _MakeCardRow(ModelCatalog.Entry entry, bool banned)
+    {
+        var row = new Button
+        {
+            Text = "",
+            Flat = true,
+            FocusMode = Control.FocusModeEnum.None,
+            ToggleMode = false,
+            SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+            CustomMinimumSize = new Vector2(0, 32),
+        };
+
+        var style = new StyleBoxFlat
+        {
+            BgColor = banned ? new Color(0.35f, 0.08f, 0.08f, 0.5f) : new Color(0.12f, 0.10f, 0.08f, 0.5f),
+            BorderColor = banned ? new Color(0.8f, 0.25f, 0.25f, 0.6f) : new Color(0.30f, 0.22f, 0.12f, 0.3f),
+            BorderWidthLeft = 1, BorderWidthRight = 1, BorderWidthTop = 1, BorderWidthBottom = 1,
+            CornerRadiusTopLeft = 3, CornerRadiusTopRight = 3, CornerRadiusBottomLeft = 3, CornerRadiusBottomRight = 3,
+            ContentMarginLeft = 8, ContentMarginRight = 8, ContentMarginTop = 4, ContentMarginBottom = 4,
+        };
+        row.AddThemeStyleboxOverride("normal", style);
+        row.AddThemeStyleboxOverride("hover", style);
+        row.AddThemeStyleboxOverride("pressed", style);
+
+        // HBox 内容
+        var hbox = new HBoxContainer
+        {
+            SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+            MouseFilter = Control.MouseFilterEnum.Ignore,
+        };
+        hbox.AddThemeConstantOverride("separation", 8);
+        row.AddChild(hbox);
+
+        // ban 标记
+        if (banned)
+        {
+            var xLabel = new Label
+            {
+                Text = "✕",
+                MouseFilter = Control.MouseFilterEnum.Ignore,
+            };
+            xLabel.AddThemeColorOverride("font_color", new Color(1f, 0.35f, 0.35f, 1f));
+            xLabel.AddThemeFontSizeOverride("font_size", 14);
+            hbox.AddChild(xLabel);
+        }
+
+        // 稀有度圆点
+        var dot = new ColorRect
+        {
+            Color = _RarityColor(entry.Rarity),
+            CustomMinimumSize = new Vector2(8, 8),
+            MouseFilter = Control.MouseFilterEnum.Ignore,
+        };
+        dot.SizeFlagsVertical = Control.SizeFlags.ShrinkCenter;
+        hbox.AddChild(dot);
+
+        // 卡牌名称
+        var nameLabel = new Label
+        {
+            Text = entry.Title ?? entry.Id,
+            SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+            MouseFilter = Control.MouseFilterEnum.Ignore,
+            ClipText = true,
+        };
+        nameLabel.AddThemeFontSizeOverride("font_size", 13);
+        nameLabel.AddThemeColorOverride("font_color",
+            banned ? new Color(0.85f, 0.45f, 0.45f, 1f) : new Color(0.95f, 0.88f, 0.72f, 1f));
+        if (banned)
+        {
+            // Godot Label 没有直接的 strikethrough，用透明度降低模拟
+            nameLabel.Modulate = new Color(0.7f, 0.7f, 0.7f, 1f);
+        }
+        hbox.AddChild(nameLabel);
+
+        // 类型标签
+        if (!string.IsNullOrEmpty(entry.CardType))
+        {
+            var typeLabel = new Label
+            {
+                Text = _LocCardType(entry.CardType),
+                MouseFilter = Control.MouseFilterEnum.Ignore,
+            };
+            typeLabel.AddThemeFontSizeOverride("font_size", 11);
+            typeLabel.AddThemeColorOverride("font_color", _CardTypeColor(entry.CardType));
+            hbox.AddChild(typeLabel);
+        }
+
+        // ID（灰色小字）
+        var idLabel = new Label
+        {
+            Text = entry.Id,
+            MouseFilter = Control.MouseFilterEnum.Ignore,
+        };
+        idLabel.AddThemeFontSizeOverride("font_size", 10);
+        idLabel.AddThemeColorOverride("font_color", new Color(0.4f, 0.38f, 0.3f, 1f));
+        hbox.AddChild(idLabel);
+
+        // hover tip
+        IDisposable hoverHandle = null;
+        row.MouseEntered += () =>
+        {
+            hoverHandle?.Dispose();
+            hoverHandle = NativeNodeFactory.ShowHoverTipForCard(row, entry.RawModel);
+        };
+        row.MouseExited += () =>
+        {
+            hoverHandle?.Dispose();
+            hoverHandle = null;
+        };
+        row.TreeExiting += () =>
+        {
+            hoverHandle?.Dispose();
+            hoverHandle = null;
+        };
+
+        row.Pressed += () => _OnCardCellClicked(entry);
+        return row;
+    }
+
+    private static bool _IsCardBanned(string id) => BlacklistStore.IsCardBannedInActive(id);
+
+    private void _OnCardCellClicked(ModelCatalog.Entry entry)
+    {
+        BlacklistStore.ToggleCard(entry.Id);
+        _RefreshContent();
+    }
+
+    private static string _LocCardType(string cardType)
+    {
+        if (!_IsChinese()) return cardType;
+        return cardType switch
+        {
+            "Attack" => "攻击",
+            "Skill" => "技能",
+            "Power" => "能力",
+            "Curse" => "诅咒",
+            "Status" => "状态",
+            _ => cardType,
+        };
+    }
+
+    private static Color _CardTypeColor(string cardType)
+    {
+        return cardType switch
+        {
+            "Attack" => new Color(0.9f, 0.4f, 0.3f, 1f),
+            "Skill" => new Color(0.3f, 0.5f, 0.9f, 1f),
+            "Power" => new Color(0.9f, 0.8f, 0.3f, 1f),
+            _ => new Color(0.6f, 0.55f, 0.42f, 1f),
+        };
     }
 
     private Control _MakeCell(ModelCatalog.Entry entry, bool banned)
@@ -794,7 +1132,8 @@ public partial class BlacklistPanel : CanvasLayer
 
     private void _OnClearPressed()
     {
-        if (_currentTab == Tab.Relics) BlacklistStore.ClearRelics();
+        if (_currentTab == Tab.Cards) BlacklistStore.ClearCards();
+        else if (_currentTab == Tab.Relics) BlacklistStore.ClearRelics();
         else BlacklistStore.ClearPotions();
         _RefreshContent();
     }
@@ -804,6 +1143,7 @@ public partial class BlacklistPanel : CanvasLayer
         var title = _Loc("商店黑名单", "Shop Blacklist");
         var relics = _Loc("遗物", "Relics");
         var potions = _Loc("药水", "Potions");
+        var cards = _Loc("卡牌", "Cards");
 
         // 显示当前分类名
         string catName;
@@ -812,7 +1152,7 @@ public partial class BlacklistPanel : CanvasLayer
         else
             catName = CharacterDetector.GetCharacterDisplayName(BlacklistStore.ActiveCategory);
 
-        _titleLabel.Text = $"  {title} · {catName}  ·  {relics} {BlacklistStore.RelicCount}/{ModelCatalog.Relics.Count}  {potions} {BlacklistStore.PotionCount}/{ModelCatalog.Potions.Count}";
+        _titleLabel.Text = $"  {title} · {catName}  ·  {relics} {BlacklistStore.RelicCount}/{ModelCatalog.Relics.Count}  {potions} {BlacklistStore.PotionCount}/{ModelCatalog.Potions.Count}  {cards} {BlacklistStore.CardCount}/{ModelCatalog.Cards.Count}";
         _hintLabel.Text = _Loc(
             $"  当前页 {bannedInTab}/{totalInTab} 已 ban；F10 切换面板",
             $"  This tab: {bannedInTab}/{totalInTab} banned; F10 toggles panel");
