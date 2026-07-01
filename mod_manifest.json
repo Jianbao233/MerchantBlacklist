@@ -1,10 +1,10 @@
 {
   "id": "MerchantBlacklist",
   "pck_name": "MerchantBlacklist",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "name": "商店黑名单 / Merchant Blacklist",
   "author": "@Bilibili我叫煎包",
-  "description": "【适配 STS2 0.107】在本机商店生成时过滤被拉黑的遗物与药水（普通商人 + 先古商人）。仅过滤本地玩家自己的商店库存，不影响宝箱/精英/Boss/事件奖励，不发任何网络消息，对端零感知。单机/主机/客机三种模式下均生效（每个 peer 各自本地 RNG 生成商店，购买消息携带完整 model 不依赖 inventory 索引，本地过滤联机安全）。暂停菜单注入「商店黑名单」按钮（默认 F10 切换）、Shift+右键即时拉黑（修饰键可改），跟随客户端语言显示中/英文。\nCompatible with STS2 0.107. Filters blacklisted relics and potions out of the local player's merchant inventory (normal + ancient merchant). Local-only view filtering; never touches elite/boss/chest/event rewards; sends no network messages. Active in singleplayer / host / client peers (each peer rolls its own shop with the same RNG seed; purchase messages carry the full model rather than an inventory index, so local filtering is multiplayer-safe). Adds a 'Shop Blacklist' button to the pause menu (default F10), Shift+RightClick to ban inside the shop (modifier configurable), and follows client language for ZH/EN UI.",
+  "description": "【适配 STS2 0.107】在本机商店生成时过滤被拉黑的遗物、药水与卡牌（普通商人 + 先古商人）。仅过滤本地玩家自己的商店库存，不影响宝箱/精英/Boss/事件奖励，不发任何网络消息，对端零感知。单机/主机/客机三种模式下均生效（每个 peer 各自本地 RNG 生成商店，购买消息携带完整 model 不依赖 inventory 索引，本地过滤联机安全）。暂停菜单注入「商店黑名单」按钮（默认 F10 切换）、Shift+右键即时拉黑（修饰键可改），跟随客户端语言显示中/英文。\nCompatible with STS2 0.107. Filters blacklisted relics, potions, and cards out of the local player's merchant inventory (normal + ancient merchant). Local-only view filtering; never touches elite/boss/chest/event rewards; sends no network messages. Active in singleplayer / host / client peers (each peer rolls its own shop with the same RNG seed; purchase messages carry the full model rather than an inventory index, so local filtering is multiplayer-safe). Adds a 'Shop Blacklist' button to the pause menu (default F10), Shift+RightClick to ban inside the shop (modifier configurable), and follows client language for ZH/EN UI.",
   "has_pck": false,
   "has_dll": true,
   "affects_gameplay": false
