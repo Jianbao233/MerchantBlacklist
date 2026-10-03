@@ -54,8 +54,13 @@
 
 ```powershell
 dotnet build -c Debug -p:Sts2SdkDir="D:\A-Developing\tools\sts2_sdk_by_version\v0.107.1"
-dotnet build -c Debug -p:Sts2SdkDir="D:\A-Developing\tools\sts2_sdk_by_version\v0.111.0"
+dotnet build -c Debug -p:Sts2SdkDir="D:\A-Developing\tools\sts2_sdk_by_version\v0.111.0+build24724944"
 ```
+
+> **同版本号重发（2026-10-04 实证）**：Steam 会在**不改 `release_info.json` 版本号**的情况下替换游戏二进制 ——
+> 当天 01:32 的 v0.111.0 重发把 `sts2.dll` 从 10,655,744 字节换成 9,757,184 字节（buildid 24724944）。
+> 所以「当前安装版本是否兼容」**不能只看版本号**：比对 `data_sts2_windows_x86_64\sts2.dll` 的 SHA256，
+> 或把门禁的 `Sts2SdkDir` 直接指向安装目录跑一遍。**本 mod 已对新构建实跑：0 错误 0 警告。**
 
 **结果：两个分支均 0 错误 0 警告。** 覆盖 `CardPoolModel.Title/IsColorless` 与全部池子子类、
 `CardModel.Title/Description/EnergyCost/Pool/Rarity/Type/HoverTips`、`CardEnergyCost.Canonical`、
