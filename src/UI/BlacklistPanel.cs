@@ -170,6 +170,9 @@ public partial class BlacklistPanel : CanvasLayer
     private readonly HashSet<string> _cardRarityFilter = new();
     private string _gridQuery = "";
     private string _cardQuery = "";
+    /** 「只看已 ban」：黑名单是长期累积的，回看时不该在几百行里翻 */
+    private bool _bannedOnly;
+    private Button _gridBannedOnly;
 
     private bool _isDragging;
     private Vector2 _dragOffset;
@@ -356,6 +359,14 @@ public partial class BlacklistPanel : CanvasLayer
     {
         if (_window == null || !GodotObject.IsInstanceValid(_window) || !_window.Visible) return;
 
+        // Esc 关面板。要吃掉事件，否则游戏会同时把暂停菜单打开
+        if (ev is InputEventKey key && key.Pressed && !key.Echo && key.Keycode == Key.Escape)
+        {
+            _HideSelf();
+            GetViewport()?.SetInputAsHandled();
+            return;
+        }
+
         if (ev is InputEventMouseButton mb && mb.ButtonIndex == MouseButton.Left)
         {
             if (mb.Pressed)
@@ -525,6 +536,10 @@ public partial class BlacklistPanel : CanvasLayer
             BorderColor = ColGold,
             BorderWidthLeft = 2, BorderWidthRight = 2, BorderWidthTop = 2, BorderWidthBottom = 2,
             CornerRadiusTopLeft = 8, CornerRadiusTopRight = 8, CornerRadiusBottomLeft = 8, CornerRadiusBottomRight = 8,
+            // 投影让浮动窗从游戏画面上"浮"起来（StyleBoxFlat 原生支持，不用自己做九宫格）
+            ShadowColor = new Color(0f, 0f, 0f, 0.55f),
+            ShadowSize = 14,
+            ShadowOffset = new Vector2(0f, 6f),
         };
         _window.AddThemeStyleboxOverride("panel", bgStyle);
         _window.Resized += _OnWindowResized;
@@ -667,6 +682,14 @@ public partial class BlacklistPanel : CanvasLayer
             int index = i;
             // 计数直接写进按钮文本（早先做成独立 Label 挂在按钮旁边，视觉上像两个控件）
             var btn = new Button { Text = _Loc(defs[i].zh, defs[i].en), ToggleMode = true, ButtonPressed = i == 0 };
+            btn.AddThemeFontSizeOverride("font_size", 13);
+            btn.AddThemeStyleboxOverride("normal", _TabStyle(false));
+            btn.AddThemeStyleboxOverride("hover", _TabStyle(true));
+            btn.AddThemeStyleboxOverride("pressed", _TabStyle(true));
+            btn.AddThemeStyleboxOverride("focus", _TabStyle(true));
+            btn.AddThemeColorOverride("font_color", ColTextDim);
+            btn.AddThemeColorOverride("font_hover_color", ColGoldBright);
+            btn.AddThemeColorOverride("font_pressed_color", ColGoldBright);
             btn.Pressed += () => _SwitchTab((Tab)index);
             bar.AddChild(btn);
             _tabButtons[i] = btn;
@@ -692,6 +715,18 @@ public partial class BlacklistPanel : CanvasLayer
             gridRow.AddChild(chip);
             _rarityChips[r] = chip;
         }
+        _gridBannedOnly = _MakeChip(_Loc("只看已 ban", "Banned only"), ColBan);
+        _gridBannedOnly.ButtonPressed = false;
+        _gridBannedOnly.Pressed += () =>
+        {
+            _bannedOnly = _gridBannedOnly.ButtonPressed;
+            _gridBannedOnly.AddThemeColorOverride("font_color", _bannedOnly ? ColBan : ColTextMute);
+            _PaintGrids();
+            _RebuildCardRows();
+            _UpdateCounters();
+        };
+        _gridBannedOnly.AddThemeColorOverride("font_color", ColTextMute);
+        gridRow.AddChild(_gridBannedOnly);
         _gridAllowAll = _MakeActionButton(gridRow, _Loc("全启用", "Allow all"), ColOk);
         _gridAllowAll.Pressed += () => _Bulk(_CurrentKind(), ban: false);
         _gridBanAll = _MakeActionButton(gridRow, _Loc("全 ban", "Ban all"), ColBan);
@@ -760,23 +795,73 @@ public partial class BlacklistPanel : CanvasLayer
             PlaceholderText = placeholder,
             CustomMinimumSize = new Vector2(230, 28),
             SizeFlagsHorizontal = Control.SizeFlags.ShrinkBegin,
+            ClearButtonEnabled = true,        // 一键清空搜索（原生能力，别自己画按钮）
         };
         edit.TextChanged += txt => onChanged(txt);
         parent.AddChild(edit);
         return edit;
     }
 
+    // ── 样式工厂：把"状态可见"做扎实（开关类控件必须一眼看出开还是关）──────
+    private static StyleBoxFlat _Flat(Color bg, Color border, int borderW, int radius, int mx, int my)
+    {
+        var s = new StyleBoxFlat
+        {
+            BgColor = bg,
+            BorderColor = border,
+            BorderWidthLeft = borderW, BorderWidthRight = borderW,
+            BorderWidthTop = borderW, BorderWidthBottom = borderW,
+            CornerRadiusTopLeft = radius, CornerRadiusTopRight = radius,
+            CornerRadiusBottomLeft = radius, CornerRadiusBottomRight = radius,
+            ContentMarginLeft = mx, ContentMarginRight = mx,
+            ContentMarginTop = my, ContentMarginBottom = my,
+        };
+        return s;
+    }
+
+    private static StyleBoxFlat _ChipStyle(bool on) => _Flat(
+        on ? new Color(ColGold.R, ColGold.G, ColGold.B, 0.24f) : new Color(0f, 0f, 0f, 0.28f),
+        on ? new Color(ColGoldBright, 0.65f) : new Color(1f, 1f, 1f, 0.07f),
+        1, 4, 9, 3);
+
+    private static StyleBoxFlat _TabStyle(bool active) => _Flat(
+        active ? new Color(ColGold.R, ColGold.G, ColGold.B, 0.22f) : new Color(0f, 0f, 0f, 0.20f),
+        active ? ColGoldBright : new Color(1f, 1f, 1f, 0.06f),
+        active ? 2 : 1, 4, 14, 6);
+
+    /** 卡牌列表的斑马纹：两行一组交替，长列表更好扫读 */
+    private static readonly StyleBoxFlat RowEven = _Flat(new Color(0f, 0f, 0f, 0f), new Color(0f, 0f, 0f, 0f), 0, 0, 8, 0);
+    private static readonly StyleBoxFlat RowOdd = _Flat(new Color(1f, 1f, 1f, 0.035f), new Color(0f, 0f, 0f, 0f), 0, 0, 8, 0);
+    private static readonly StyleBoxFlat RowHover = _Flat(new Color(ColGold.R, ColGold.G, ColGold.B, 0.16f), new Color(0f, 0f, 0f, 0f), 0, 0, 8, 0);
+
+    /** 滚动条跟着配色走（Godot 默认滚动条和这套黑金配色不搭）*/
+    private static void _StyleScroll(ScrollContainer scroll)
+    {
+        var bar = scroll?.GetVScrollBar();
+        if (bar == null) return;
+        bar.AddThemeStyleboxOverride("scroll", _Flat(new Color(0f, 0f, 0f, 0.25f), new Color(0f, 0f, 0f, 0f), 0, 3, 0, 0));
+        bar.AddThemeStyleboxOverride("grabber", _Flat(new Color(ColGold, 0.55f), new Color(0f, 0f, 0f, 0f), 0, 3, 0, 0));
+        bar.AddThemeStyleboxOverride("grabber_highlight", _Flat(new Color(ColGoldBright, 0.85f), new Color(0f, 0f, 0f, 0f), 0, 3, 0, 0));
+        bar.AddThemeStyleboxOverride("grabber_pressed", _Flat(ColGoldBright, new Color(0f, 0f, 0f, 0f), 0, 3, 0, 0));
+        bar.CustomMinimumSize = new Vector2(8, 0);
+    }
+
     /// <summary>
     /// 筛选块。**不要**往 Button 里塞 HBox+Label —— Button 不是容器，子控件尺寸会是 0，
     /// 实测结果是只看得见色点、文字完全不渲染。直接用 Button 自己的 Text + 字色。
+    /// 开/关两态各给一套 stylebox，否则玩家看不出这个筛选到底生效没有。
     /// </summary>
     private Button _MakeChip(string text, Color tint)
     {
         var btn = new Button { Text = text, ToggleMode = true, ButtonPressed = true };
         btn.AddThemeFontSizeOverride("font_size", 11);
-        btn.AddThemeColorOverride("font_color", tint);
+        btn.AddThemeStyleboxOverride("normal", _ChipStyle(false));
+        btn.AddThemeStyleboxOverride("hover", _ChipStyle(true));
+        btn.AddThemeStyleboxOverride("pressed", _ChipStyle(true));
+        btn.AddThemeStyleboxOverride("focus", _ChipStyle(true));
+        btn.AddThemeColorOverride("font_color", ColTextMute);
+        btn.AddThemeColorOverride("font_hover_color", tint);
         btn.AddThemeColorOverride("font_pressed_color", tint);
-        btn.AddThemeColorOverride("font_hover_color", tint.Lightened(0.25f));
         btn.TooltipText = text;
         return btn;
     }
@@ -815,6 +900,15 @@ public partial class BlacklistPanel : CanvasLayer
 
         _cardEmpty = _MakeEmptyState(_cardPane, _Loc("没有匹配的卡牌", "No matching cards"));
 
+        _StyleScroll(_relicScroll);
+        _StyleScroll(_potionScroll);
+        _StyleScroll(_cardScroll);
+        // 滚动容器不参与键盘焦点：默认主题会在获得焦点时画一个装饰（实测在内容左上角出现一个小金三角）
+        foreach (var s in new[] { _relicScroll, _potionScroll, _cardScroll })
+        {
+            s.FocusMode = Control.FocusModeEnum.None;
+            s.AddThemeStyleboxOverride("focus", _Flat(new Color(0, 0, 0, 0), new Color(0, 0, 0, 0), 0, 0, 0, 0));
+        }
         _cardScroll.GetVScrollBar().ValueChanged += _ => _UpdateCardWindow();
     }
 
@@ -1289,6 +1383,7 @@ public partial class BlacklistPanel : CanvasLayer
 
     private bool _CardMatches(ModelCatalog.Entry c)
     {
+        if (_bannedOnly && !_ActiveBanned(Kind.Card, c.Id)) return false;
         if (_typeFilter.Count > 0 && !_typeFilter.Contains(c.CardType)) return false;
         if (_cardRarityFilter.Count > 0 && !_cardRarityFilter.Contains(c.Rarity)) return false;
         if (_cardQuery.Length == 0) return true;
@@ -1378,6 +1473,8 @@ public partial class BlacklistPanel : CanvasLayer
                 _rowPool[i] = row;
             }
             _BindRow(row, model);
+            if (!model.IsHeader)
+                row.Node.AddThemeStyleboxOverride("normal", (i % 2 == 0) ? RowEven : RowOdd);
 
             // 关键：行是 _cardSizer 的普通子节点，**必须自己摆位置**。
             // 漏掉这一步的后果实测是所有行都堆在 (0,0) 重叠成一团（卡牌列表整片空白＋首行文字糊在一起）。
@@ -1413,9 +1510,10 @@ public partial class BlacklistPanel : CanvasLayer
     {
         var node = new Button { Flat = true, FocusMode = Control.FocusModeEnum.All };
         node.CustomMinimumSize = new Vector2(0, CardRowHeight);
-        node.AddThemeStyleboxOverride("hover", new StyleBoxFlat { BgColor = ColRowHover });
-        node.AddThemeStyleboxOverride("pressed", new StyleBoxFlat { BgColor = ColRowHover });
-        node.AddThemeStyleboxOverride("focus", new StyleBoxFlat { BgColor = ColRowHover });
+        node.AddThemeStyleboxOverride("normal", RowEven);      // 斑马纹在 _UpdateCardWindow 里按行号覆盖
+        node.AddThemeStyleboxOverride("hover", RowHover);
+        node.AddThemeStyleboxOverride("pressed", RowHover);
+        node.AddThemeStyleboxOverride("focus", RowHover);
 
         var hbox = new HBoxContainer { MouseFilter = Control.MouseFilterEnum.Ignore };
         hbox.SetAnchorsPreset(Control.LayoutPreset.FullRect);
@@ -1427,7 +1525,10 @@ public partial class BlacklistPanel : CanvasLayer
         cost.AddThemeColorOverride("font_color", ColGoldBright);
         hbox.AddChild(cost);
 
-        var name = new Label { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill, ClipText = true };
+        // 名称列给**固定宽度**、不用 ExpandFill：否则名称与右侧的类型/稀有度之间会拉开一大片空白
+        // （实测在 1000 宽面板里中段空出约 600px，列表看着很散）。类型/稀有度紧随名称成列对齐，
+        // ID 用 Spacer 推到最右。
+        var name = new Label { CustomMinimumSize = new Vector2(300, 0), ClipText = true };
         name.AddThemeFontSizeOverride("font_size", 13);
         name.AddThemeColorOverride("font_color", ColText);
         hbox.AddChild(name);
@@ -1436,9 +1537,11 @@ public partial class BlacklistPanel : CanvasLayer
         type.AddThemeFontSizeOverride("font_size", 11);
         hbox.AddChild(type);
 
-        var rarity = new Label { CustomMinimumSize = new Vector2(44, 0), HorizontalAlignment = HorizontalAlignment.Right };
+        var rarity = new Label { CustomMinimumSize = new Vector2(48, 0) };
         rarity.AddThemeFontSizeOverride("font_size", 11);
         hbox.AddChild(rarity);
+
+        hbox.AddChild(new Control { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill });
 
         var id = new Label { CustomMinimumSize = new Vector2(170, 0), HorizontalAlignment = HorizontalAlignment.Right, ClipText = true };
         id.AddThemeFontSizeOverride("font_size", 10);
@@ -1585,6 +1688,7 @@ public partial class BlacklistPanel : CanvasLayer
 
     private bool _GridMatches(ModelCatalog.Entry entry)
     {
+        if (_bannedOnly && !_ActiveBanned(_CurrentKind() == Kind.Potion ? Kind.Potion : Kind.Relic, entry.Id)) return false;
         if (_rarityFilter.Count > 0 && !_rarityFilter.Contains(entry.Rarity)) return false;
         if (_gridQuery.Length == 0) return true;
         var q = _gridQuery.ToLowerInvariant();
@@ -1637,6 +1741,9 @@ public partial class BlacklistPanel : CanvasLayer
 
     private void _SwitchTab(Tab tab)
     {
+        // 记住离开时旧页签的滚动位置，回来时还原（长列表里翻到一半切页签再回来会跳回顶部很难受）
+        _tabScroll[(int)_currentTab] = _CurrentScrollValue();
+
         _currentTab = tab;
         for (int i = 0; i < 3; i++) _tabButtons[i].ButtonPressed = (int)tab == i;
         _relicPane.Visible = tab == Tab.Relics;
@@ -1650,6 +1757,28 @@ public partial class BlacklistPanel : CanvasLayer
         if (tab == Tab.Cards) _UpdateCardWindow();
         _UpdateCounters();
         _HideCardPreview();
+        CallDeferred(nameof(_RestoreTabScroll));
+    }
+
+    private readonly int[] _tabScroll = new int[3];
+
+    private int _CurrentScrollValue() => _currentTab switch
+    {
+        Tab.Cards => (int)(_cardScroll?.ScrollVertical ?? 0),
+        Tab.Potions => (int)(_potionScroll?.ScrollVertical ?? 0),
+        _ => (int)(_relicScroll?.ScrollVertical ?? 0),
+    };
+
+    private void _RestoreTabScroll()
+    {
+        int value = _tabScroll[(int)_currentTab];
+        var scroll = _currentTab switch
+        {
+            Tab.Cards => _cardScroll,
+            Tab.Potions => _potionScroll,
+            _ => _relicScroll,
+        };
+        if (scroll != null) scroll.ScrollVertical = value;
     }
 
     private void _ToggleBan(Kind kind, string id)
@@ -2115,6 +2244,21 @@ public partial class BlacklistPanel : CanvasLayer
                 p._ClampWindow();
                 p._LayoutGridColumns();
                 p._HideCardPreview();
+                return true;
+            case 9:     // 只看已 ban（回看长期累积的黑名单）
+                p._window.Size = new Vector2(1000f, 700f);
+                p._ClampWindow();
+                p._LayoutGridColumns();
+                BlacklistStore.ActiveCategory = "GLOBAL";
+                p._UpdateCategoryButtons();
+                p._bannedOnly = true;
+                if (p._gridBannedOnly != null)
+                {
+                    p._gridBannedOnly.ButtonPressed = true;
+                    p._gridBannedOnly.AddThemeColorOverride("font_color", ColBan);
+                }
+                p._SetPoseTab(Tab.Relics);
+                p._PaintAll();
                 return true;
             default:
                 return false;
