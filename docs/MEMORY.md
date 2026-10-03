@@ -50,7 +50,7 @@
 
 **方式一 · 编译期门禁（推荐，可重复）**
 
-`tmp/mb-api-check/` 把 mod 反射访问的**全部**游戏成员写成 C# 表达式；能编译通过即证明这些成员在该版本存在且签名不变：
+`main/sts2/tools/MerchantBlacklistApiGate/`（工作区本地工具，不进任何 git 仓）把 mod 反射访问的**全部**游戏成员写成 C# 表达式；能编译通过即证明这些成员在该版本存在且签名不变：
 
 ```powershell
 dotnet build -c Debug -p:Sts2SdkDir="D:\A-Developing\tools\sts2_sdk_by_version\v0.107.1"
