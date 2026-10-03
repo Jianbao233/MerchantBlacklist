@@ -3,13 +3,14 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Reflection;
 using Godot;
-using MerchantBlacklist.Core;
 
 namespace MerchantBlacklist.UI;
 
 /// <summary>
-/// 通过反射枚举 ModelDb.AllRelics / AllPotions，预解析 entry id、标题、图标、稀有度。
+/// 通过反射枚举 ModelDb.AllRelics / AllPotions / AllCards，预解析 entry id、标题、图标、稀有度与卡池信息。
 /// 首次访问时建立缓存，后续 UI 渲染零反射。
+/// 注意：缓存是**全量**的，与当前编辑分类（全局 / 角色）无关——分类过滤必须由面板在渲染时做，
+/// 否则 ModelCatalog 的缓存会把首次构建时的分类结果固化，切换分类后看不到变化（Invalidate 无人调用）。
 /// </summary>
 internal static class ModelCatalog
 {
@@ -23,6 +24,8 @@ internal static class ModelCatalog
         public object RawModel;
         public string CardType;
         public string PoolName;
+        /// <summary>卡池是否为无色池。取自 CardPoolModel.IsColorless（权威判定），不要用池名做字符串匹配。</summary>
+        public bool IsColorless;
     }
 
     private static List<Entry> _relics;
@@ -35,7 +38,6 @@ internal static class ModelCatalog
     private static Type _potionModelType;
     private static Type _cardModelType;
     private static Type _modelIdType;
-    private static Type _locStringType;
 
     public static IReadOnlyList<Entry> Relics
     {
@@ -96,7 +98,6 @@ internal static class ModelCatalog
         _potionModelType = FindType("MegaCrit.Sts2.Core.Models.PotionModel");
         _cardModelType = FindType("MegaCrit.Sts2.Core.Models.CardModel");
         _modelIdType = FindType("MegaCrit.Sts2.Core.Models.ModelId");
-        _locStringType = FindType("MegaCrit.Sts2.Core.Localization.LocString");
 
         return _modelDbType != null && _relicModelType != null && _potionModelType != null && _cardModelType != null && _modelIdType != null;
     }
@@ -217,6 +218,14 @@ internal static class ModelCatalog
         var poolProp = _cardModelType.GetProperty("Pool");
         var entryProp = _modelIdType.GetProperty("Entry");
 
+        // 卡池维度统一从 CardPoolModel 基类取一次，不再按具体运行时类型反复 GetProperty。
+        // 已核对 v0.111.0：CardPoolModel 是 abstract，Title 为小写标识（"ironclad" / "silent" /
+        // "regent" / "necrobinder" / "defect" / "colorless" …），IsColorless 才是权威的无色判定。
+        // 不要再用 Title.Contains("Colorless") 这类大小写敏感的字符串匹配——Title 是小写，永远匹配不上。
+        var poolBaseType = FindType("MegaCrit.Sts2.Core.Models.CardPoolModel");
+        var poolTitleProp = poolBaseType?.GetProperty("Title");
+        var poolIsColorlessProp = poolBaseType?.GetProperty("IsColorless");
+
         foreach (var model in models)
         {
             if (model == null) continue;
@@ -229,46 +238,18 @@ internal static class ModelCatalog
                 var pool = poolProp?.GetValue(model);
                 if (pool == null) continue;
 
+                // 排除非商店池：Curse / Event / Status / Token / Quest / Deprecated。
+                // 按具体卡池类型名判定（v0.111.0 实测类名为 CurseCardPool / EventCardPool /
+                // StatusCardPool / TokenCardPool / QuestCardPool / DeprecatedCardPool）。
+                // 未识别的池类型（例如其它 mod 注册的自定义池）默认保留，避免漏掉本来可以 ban 的内容。
                 var poolType = pool.GetType().Name;
-
-                // 排除非商店池：Curse / Event / Status / Token / Quest / Deprecated
                 if (poolType.Contains("Curse") || poolType.Contains("Event") ||
                     poolType.Contains("Status") || poolType.Contains("Token") ||
                     poolType.Contains("Quest") || poolType.Contains("Deprecated"))
                     continue;
 
-                var poolTitleProp = pool.GetType().GetProperty("Title");
-                var poolName = poolTitleProp?.GetValue(pool)?.ToString() ?? string.Empty;
-
-                // 角色过滤：ActiveCategory=角色ID时只显示该角色卡+无色卡
-                var activeCategory = BlacklistStore.ActiveCategory;
-                if (activeCategory != "GLOBAL" && !string.IsNullOrEmpty(activeCategory))
-                {
-                    bool isColorlessPool = poolType.Contains("Colorless");
-                    if (isColorlessPool)
-                    {
-                        // 无色卡始终保留
-                    }
-                    else
-                    {
-                        bool isCurrentCharPool = false;
-                        foreach (var charId in CharacterDetector.KnownCharacters)
-                        {
-                            if (charId == activeCategory)
-                            {
-                                var displayName = CharacterDetector.GetCharacterDisplayName(charId);
-                                if (poolName != null &&
-                                    (poolName.Contains(displayName, StringComparison.OrdinalIgnoreCase) ||
-                                     poolName.Contains(charId, StringComparison.OrdinalIgnoreCase)))
-                                {
-                                    isCurrentCharPool = true;
-                                    break;
-                                }
-                            }
-                        }
-                        if (!isCurrentCharPool) continue;
-                    }
-                }
+                var poolName = poolTitleProp?.GetValue(pool) as string ?? string.Empty;
+                var isColorless = poolIsColorlessProp?.GetValue(pool) as bool? ?? false;
 
                 var rarity = rarityProp?.GetValue(model);
                 var rarityName = rarity?.ToString() ?? string.Empty;
@@ -286,6 +267,7 @@ internal static class ModelCatalog
                     RawModel = model,
                     CardType = cardTypeName,
                     PoolName = poolName,
+                    IsColorless = isColorless,
                 });
             }
             catch (Exception ex)
@@ -297,9 +279,7 @@ internal static class ModelCatalog
         // 排序：角色卡在前，无色卡在后，再按 RarityOrder，再按 Id
         list.Sort((a, b) =>
         {
-            var aColorless = a.PoolName != null && a.PoolName.Contains("Colorless");
-            var bColorless = b.PoolName != null && b.PoolName.Contains("Colorless");
-            var c = aColorless.CompareTo(bColorless);
+            var c = a.IsColorless.CompareTo(b.IsColorless);
             if (c != 0) return c;
             c = a.RarityOrder.CompareTo(b.RarityOrder);
             return c != 0 ? c : string.Compare(a.Id, b.Id, StringComparison.Ordinal);

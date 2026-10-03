@@ -43,13 +43,36 @@
 | `src/UI/NativeNodeFactory.cs` | 复用原生 `NRelic.Create` / `NPotion.Create` / `NHoverTipSet.CreateAndShow` |
 | `src/UI/BlacklistPanel.cs` | 面板（`CanvasLayer`，Layer=100），遗物/药水/卡牌三个页签 |
 
-## 4. v0.111.0 兼容性核实结论（2026-10-03）
+## 4. 游戏版本兼容性核实结论（2026-10-03）
 
-逐项核对 `tools/Tools/sts.dll历史存档/sts2_decompiled_v0.111.0_20260814/`，**mod 用到的每个依赖点都存在**：
+> 本机 mod 生态同时服务两个分支：**正式版 `v0.107.1`** 与 **public-beta `v0.111.0`**。
+> 2026-10-03 当天游戏曾停在 beta，随后切回正式版（`release_info.json` 实测）。
 
-`MerchantInventory.CreateForNormalMerchant` · `ModelDb.AllRelics/AllPotions/AllCards` · `RelicModel.{Id,Icon,Title,Rarity,IsAllowedInShops,HoverTips}` · `PotionModel.{Id,Image,Title,Rarity,HoverTips}` · `CardModel.{Id,Title(string),Description(LocString),CanonicalEnergyCost(protected),Rarity,Type,Pool,HoverTips}` · `CardPoolModel.{Title,IsColorless}` 及其 12 个池子子类 · `CardCreationResult.Card` · `MerchantCardEntry.{CreationResult,Populate}` · `MerchantEntry.Cost` · `NRelic.Create` / `NPotion.Create` / `NCard.Create` · `NHoverTipSet.CreateAndShow/Remove` · `LocManager.Instance/Language` · 角色 id 仍为 5 个大写：`IRONCLAD / SILENT / DEFECT / NECROBINDER / REGENT`。
+**方式一 · 编译期门禁（推荐，可重复）**
 
-运行时证据：部署侧日志显示 mod 在 v0.111.0 下加载成功、暂停菜单按钮注入成功、`ModelCatalog ready`。
+`tmp/mb-api-check/` 把 mod 反射访问的**全部**游戏成员写成 C# 表达式；能编译通过即证明这些成员在该版本存在且签名不变：
+
+```powershell
+dotnet build -c Debug -p:Sts2SdkDir="D:\A-Developing\tools\sts2_sdk_by_version\v0.107.1"
+dotnet build -c Debug -p:Sts2SdkDir="D:\A-Developing\tools\sts2_sdk_by_version\v0.111.0"
+```
+
+**结果：两个分支均 0 错误 0 警告。** 覆盖 `CardPoolModel.Title/IsColorless` 与全部池子子类、
+`CardModel.Title/Description/EnergyCost/Pool/Rarity/Type/HoverTips`、`CardEnergyCost.Canonical`、
+`MerchantCardEntry.Populate` / `CardCreationResult.Card`、`NRelic.Create(IconSize)` / `NPotion.Create` /
+`NCard.Create`（2 参）/ `NHoverTipSet.CreateAndShow+Remove`、`ModelDb.AllRelics/AllPotions/AllCards/AllCharacters`、
+`MerchantInventory.CreateForNormalMerchant` + `Player`、`RunManager.Instance` / `DebugOnlyGetState` /
+`IRunState.Players` / `LocalContext.GetMe` / `Character.Id.Entry`、`LocManager.Instance.Language`、
+`SaveManager.Instance.MarkPotionAsSeen`、`PotionFactory.CreateRandomPotionOutOfCombat`、
+`ModManifest.{id,version,affectsGameplay,minGameVersion,dependencies}`。
+
+**方式二 · 交叉核对反编译文本**
+
+`tools/Tools/sts.dll历史存档/sts2_decompiled_v0.111.0_20260814/`（beta）与
+`docs/archive/历代版本源码/SL2_v0.107.1/src/`（正式版，GDRE 快照）。已确认两个分支的卡池类名、`Title` 取值
+（`"ironclad"`/`"colorless"`/`"curse"`…）与 `IsColorless` 取值**完全一致**（0.111.0 仅多一个 `DeprivedCardPool`）。
+
+**运行时证据**：部署侧日志显示 mod 在 v0.111.0 下加载成功、暂停菜单按钮注入成功、`ModelCatalog ready`。
 
 ## 5. 数据与持久化
 
@@ -81,11 +104,17 @@
 
 ## 7. 已知待办
 
-**A. 卡牌 ban 收尾（v0.3.0 已实现主体，以下为遗留）**
-1. `NativeNodeFactory.TryCreateCard` / `ShowHoverTipForCard` 已成**死代码**；且 `NCard.Create(CardModel, ModelVisibility = Visible)` 是 2 个参数，`MethodInfo.Invoke` 只传 1 参会抛 `TargetParameterCountException`（即从未生效过）。删除或补齐参数。
-2. 卡牌悬浮预览反射取 `CardModel.CanonicalEnergyCost`（**protected**）；官方注释建议改用公开的 `EnergyCost.Canonical`。
-3. 卡牌分组判定用 `pool.GetType().Name.Contains("Colorless"/"Curse"/…)` 字符串匹配——实测在 v0.111.0 可用，但应改用 `CardPoolModel.IsColorless` 与 `Title`。注意 `DeprecatedCardPool.Title` 与 `TokenCardPool.Title` **都是 `"token"`**。
-4. `ModelCatalog.BuildCardEntries` 的角色过滤写法绕（中文显示名 + 大写 charId 双重 `Contains` 兜底），应改为按 pool `Title`（lowercase，如 `"ironclad"`）判定。
+**A. 卡牌 ban 收尾** —— 1–4 已于 2026-10-03 完成（双分支编译期门禁验证），剩 5。
+
+已完成：
+
+1. **删死代码**：`NativeNodeFactory.TryCreateCard` / `ShowHoverTipForCard`（无调用方；且 `NCard.Create` 是 2 参，单参 `MethodInfo.Invoke` 必抛 `TargetParameterCountException`，即**从未生效过**）；`InventoryFilter` 的 `_relicFactoryType` / `_pullNextRelicFromBackFiltered` / `_cardModelType` / `_cardModelIdProp` / `BuildTypedPredicate*`；`ModelCatalog._locStringType` 与失效的 `using`。用 Roslyn 分析器（`EnforceCodeStyleInBuild` + `AnalysisMode=All`）复扫，无 IDE0051/IDE0052 残留。
+2. **卡牌费用改走公开链**：`CardModel.EnergyCost`（public）→ `CardEnergyCost.Canonical`（public int），不再用 `NonPublic` 反射读 protected 的 `CanonicalEnergyCost`。
+3. **无色判定改用 `CardPoolModel.IsColorless`** —— 顺带**修掉一个真 bug**：`CardPoolModel.Title` 是**小写**（`"colorless"`），旧代码用 `PoolName.Contains("Colorless")`（大小写敏感）判定，**恒为 false**，导致「无色卡」分组永远为空、所有卡都被归进「角色卡」；排序里的无色后置同样失效。两个分支同样中招。
+4. **角色过滤从 `ModelCatalog` 移到面板渲染期**（`BlacklistPanel._RefreshCardContent`）：用 `IsColorless` + `PoolName` 与角色 id 忽略大小写比较。原先过滤被烘焙进 ModelCatalog 的**全量缓存**，而 `Invalidate()` 无调用方 → 切换全局/角色后卡牌列表不会变。
+
+待办：
+
 5. 卡牌 ban 目前只拦**商店卡槽**；`docs/TODO_internal.md` 规划的「战斗外卡牌奖励生成」入口尚未做。
 
 **B. 元数据与文档对齐**

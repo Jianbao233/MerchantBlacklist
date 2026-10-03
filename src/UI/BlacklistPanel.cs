@@ -734,12 +734,24 @@ public partial class BlacklistPanel : CanvasLayer
                 string expected = _cardTypeFilterIndex switch { 1 => "Attack", 2 => "Skill", 3 => "Power", _ => null };
                 if (e.CardType != expected) continue;
             }
+            // 角色过滤：面板选中某角色层时，只显示「该角色池的卡 + 无色卡」。
+            // 必须在渲染时过滤，不能放进 ModelCatalog —— 那里是全量缓存，会把首次构建时的
+            // 分类结果固化，切换全局/角色后列表不会变（ModelCatalog.Invalidate 无调用方）。
+            // 卡池 Title 是小写标识（"ironclad" …），角色 id 是大写（"IRONCLAD"），按忽略大小写比较。
+            var activeCategory = BlacklistStore.ActiveCategory;
+            if (!string.IsNullOrEmpty(activeCategory) && activeCategory != "GLOBAL")
+            {
+                if (!e.IsColorless &&
+                    !string.Equals(e.PoolName, activeCategory, StringComparison.OrdinalIgnoreCase))
+                    continue;
+            }
             filtered.Add(e);
         }
 
-        // 按池分组：角色卡 vs 无色卡
-        var charCards = filtered.Where(e => !IsColorlessPool(e.PoolName)).ToList();
-        var colorlessCards = filtered.Where(e => IsColorlessPool(e.PoolName)).ToList();
+        // 按池分组：角色卡 vs 无色卡。用 CardPoolModel.IsColorless 判定，
+        // 不要用池名做匹配 —— Title 是小写（"colorless"），Contains("Colorless") 永远为 false。
+        var charCards = filtered.Where(e => !e.IsColorless).ToList();
+        var colorlessCards = filtered.Where(e => e.IsColorless).ToList();
 
         int totalBanned = 0;
 
@@ -765,12 +777,6 @@ public partial class BlacklistPanel : CanvasLayer
         }
 
         _UpdateTitleAndHint(totalBanned, filtered.Count);
-    }
-
-    private static bool IsColorlessPool(string poolName)
-    {
-        if (string.IsNullOrEmpty(poolName)) return false;
-        return poolName.Contains("Colorless") || poolName.Contains("无色");
     }
 
     private int _BuildCardSection(string title, List<ModelCatalog.Entry> list)
@@ -954,13 +960,14 @@ public partial class BlacklistPanel : CanvasLayer
 
             try
             {
-                // 反射取 CardModel 的 Title / Description / CanonicalEnergyCost
+                // 反射取 CardModel 的 Title / Description / 费用。
+                // 费用走公开链：CardModel.EnergyCost（public）→ CardEnergyCost.Canonical（public int）。
+                // CanonicalEnergyCost 是 protected，之前靠 NonPublic 反射去读，既没必要也不稳。
                 var model = entry.RawModel;
                 var modelType = model.GetType();
                 var titleProp = modelType.GetProperty("Title");
                 var descProp = modelType.GetProperty("Description");
-                var costProp = modelType.GetProperty("CanonicalEnergyCost",
-                    System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                var energyCostProp = modelType.GetProperty("EnergyCost");
 
                 string titleText = titleProp?.GetValue(model) as string ?? entry.Title ?? entry.Id;
                 string descText = "";
@@ -972,7 +979,13 @@ public partial class BlacklistPanel : CanvasLayer
                     var fmtMethod = descType.GetMethod("GetFormattedText", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
                     descText = fmtMethod?.Invoke(descObj, null) as string ?? "";
                 }
-                int cost = costProp != null ? (int)costProp.GetValue(model) : -1;
+                int cost = -1;
+                var energyCost = energyCostProp?.GetValue(model);
+                if (energyCost != null)
+                {
+                    var canonicalProp = energyCost.GetType().GetProperty("Canonical");
+                    if (canonicalProp?.GetValue(energyCost) is int canonical) cost = canonical;
+                }
 
                 // 构建预览面板
                 var preview = new Godot.Panel
@@ -1005,12 +1018,7 @@ public partial class BlacklistPanel : CanvasLayer
                 };
                 costTitleRow.AddThemeConstantOverride("separation", 10);
 
-                string costDisplay = cost switch
-                {
-                    -1 => "?",
-                    _ when costProp == null => "?",
-                    _ => cost.ToString(),
-                };
+                string costDisplay = cost >= 0 ? cost.ToString() : "?";
                 var costLabel = new Godot.Label
                 {
                     Text = costDisplay,

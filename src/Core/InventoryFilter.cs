@@ -16,7 +16,6 @@ internal static class InventoryFilter
     private static Type _merchantInventoryType;
     private static Type _merchantRelicEntryType;
     private static Type _merchantPotionEntryType;
-    private static Type _relicFactoryType;
     private static Type _potionFactoryType;
     private static Type _relicModelType;
     private static Type _potionModelType;
@@ -34,7 +33,6 @@ internal static class InventoryFilter
     private static PropertyInfo _playerProp;
     private static PropertyInfo _playerRngProp;
     private static PropertyInfo _shopsRngProp;
-    private static MethodInfo _pullNextRelicFromBackFiltered;
     private static MethodInfo _setRelicModelMethod;
     private static MethodInfo _toMutableRelicMethod;
 
@@ -44,13 +42,11 @@ internal static class InventoryFilter
     private static MethodInfo _markPotionSeenMethod;
 
     private static Type _merchantCardEntryType;
-    private static Type _cardModelType;
     private static Type _cardCreationResultType;
     private static PropertyInfo _characterCardEntriesProp;
     private static PropertyInfo _colorlessCardEntriesProp;
     private static PropertyInfo _cardEntryCreationResultProp;
     private static PropertyInfo _creationResultCardProp;
-    private static PropertyInfo _cardModelIdProp;
     private static MethodInfo _cardPopulateMethod;
 
     private static bool _initialized;
@@ -66,7 +62,6 @@ internal static class InventoryFilter
             _merchantInventoryType = FindType("MegaCrit.Sts2.Core.Entities.Merchant.MerchantInventory");
             _merchantRelicEntryType = FindType("MegaCrit.Sts2.Core.Entities.Merchant.MerchantRelicEntry");
             _merchantPotionEntryType = FindType("MegaCrit.Sts2.Core.Entities.Merchant.MerchantPotionEntry");
-            _relicFactoryType = FindType("MegaCrit.Sts2.Core.Factories.RelicFactory");
             _potionFactoryType = FindType("MegaCrit.Sts2.Core.Factories.PotionFactory");
             _relicModelType = FindType("MegaCrit.Sts2.Core.Models.RelicModel");
             _potionModelType = FindType("MegaCrit.Sts2.Core.Models.PotionModel");
@@ -74,7 +69,7 @@ internal static class InventoryFilter
             _modelDbType = FindType("MegaCrit.Sts2.Core.Models.ModelDb");
 
             if (_merchantInventoryType == null || _merchantRelicEntryType == null || _merchantPotionEntryType == null
-                || _relicFactoryType == null || _potionFactoryType == null
+                || _potionFactoryType == null
                 || _relicModelType == null || _potionModelType == null || _modelIdType == null
                 || _modelDbType == null)
             {
@@ -96,17 +91,6 @@ internal static class InventoryFilter
             _toMutableRelicMethod = _relicModelType.GetMethod("ToMutable", BindingFlags.Public | BindingFlags.Instance);
             _toMutablePotionMethod = _potionModelType.GetMethod("ToMutable", BindingFlags.Public | BindingFlags.Instance);
             _calcCostMethod = _merchantPotionEntryType.GetMethod("CalcCost", BindingFlags.Public | BindingFlags.Instance);
-
-            foreach (var m in _relicFactoryType.GetMethods(BindingFlags.Public | BindingFlags.Static))
-            {
-                if (m.Name != "PullNextRelicFromBack") continue;
-                var p = m.GetParameters();
-                if (p.Length == 3 && p[1].ParameterType.Name == "RelicRarity")
-                {
-                    _pullNextRelicFromBackFiltered = m;
-                    break;
-                }
-            }
 
             foreach (var m in _potionFactoryType.GetMethods(BindingFlags.Public | BindingFlags.Static))
             {
@@ -133,13 +117,11 @@ internal static class InventoryFilter
             }
 
             _merchantCardEntryType = FindType("MegaCrit.Sts2.Core.Entities.Merchant.MerchantCardEntry");
-            _cardModelType = FindType("MegaCrit.Sts2.Core.Models.CardModel");
             _cardCreationResultType = FindType("MegaCrit.Sts2.Core.Entities.Cards.CardCreationResult");
             _characterCardEntriesProp = _merchantInventoryType.GetProperty("CharacterCardEntries");
             _colorlessCardEntriesProp = _merchantInventoryType.GetProperty("ColorlessCardEntries");
             _cardEntryCreationResultProp = _merchantCardEntryType?.GetProperty("CreationResult");
             _creationResultCardProp = _cardCreationResultType?.GetProperty("Card");
-            _cardModelIdProp = FindAbstractProp(_cardModelType, "Id") ?? _cardModelType?.GetProperty("Id");
             _cardPopulateMethod = _merchantCardEntryType?.GetMethod("Populate", BindingFlags.Public | BindingFlags.Instance);
 
             _initialized = true;
@@ -456,20 +438,6 @@ internal static class InventoryFilter
             t = t.BaseType;
         }
         return null;
-    }
-
-    private static object BuildTypedPredicate(Func<object, bool> generic, Type modelType, Type delegateType)
-    {
-        var helperMethod = typeof(InventoryFilter)
-            .GetMethod(nameof(BuildTypedPredicateGeneric), BindingFlags.NonPublic | BindingFlags.Static)
-            .MakeGenericMethod(modelType);
-        return helperMethod.Invoke(null, new object[] { generic, delegateType });
-    }
-
-    private static Delegate BuildTypedPredicateGeneric<TModel>(Func<object, bool> generic, Type delegateType)
-    {
-        Func<TModel, bool> typed = m => generic((object)m);
-        return Delegate.CreateDelegate(delegateType, typed.Target, typed.Method);
     }
 
     private static Type FindType(string fullName)
