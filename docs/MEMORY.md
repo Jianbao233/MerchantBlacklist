@@ -42,6 +42,11 @@
 | `src/UI/ModelCatalog.cs` | 反射枚举 `ModelDb.AllRelics / AllPotions / AllCards`，缓存成 UI 条目 |
 | `src/UI/NativeNodeFactory.cs` | 复用原生 `NRelic.Create` / `NPotion.Create` / `NHoverTipSet.CreateAndShow` |
 | `src/UI/BlacklistPanel.cs` | 面板（`CanvasLayer`，Layer=100），遗物/药水/卡牌三个页签 |
+| `src/SelfTest.cs` | **环境变量守卫的启动自检**（默认完全惰性）：设 `MERCHANTBLACKLIST_SELFTEST=1` 时，启动约 2 秒后（120 帧）自动建立一次 `ModelCatalog` 并把「面板应该显示什么」打进日志。**只读**，不写设置、不改商店。用途：真机验证不必再依赖"有人按 F10"。 |
+
+> **为什么需要自检**：`ModelCatalog` 只在打开过一次面板时才建立，因此真机验证原本必须有人进游戏操作；
+> 自检把这条路径变成「设环境变量 → 启动 → 读日志」。它输出的 `ModelCatalog ready. relics=…, potions=…, cards=…`
+> 与面板那行同形，`main/sts2/tools/MerchantBlacklistVerify/verify-in-game.ps1` 用同一个正则解析两种来源。
 
 ## 4. 游戏版本兼容性核实结论（2026-10-03）
 

@@ -27,6 +27,7 @@ public static class MerchantBlacklistMod
             MerchantBlacklistLog.Info($"Loaded. Banned relics={BlacklistStore.RelicCount}, potions={BlacklistStore.PotionCount}.");
             EnsureInputNode();
             HotkeyService.Initialize();
+            SelfTest.Schedule();          // 仅当 MERCHANTBLACKLIST_SELFTEST=1 时才真的做事
         }
         catch (Exception ex)
         {
