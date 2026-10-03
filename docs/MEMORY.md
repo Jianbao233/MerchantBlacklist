@@ -159,8 +159,15 @@ dotnet build -c Debug -p:Sts2SdkDir="D:\A-Developing\tools\sts2_sdk_by_version\v
 
 **B. 元数据与文档对齐**
 1. ✅ 已补 `min_game_version: "0.107.1"`（最低支持版本，与 LoadOrderManager / RitsuLib 同约定），消除每次启动的 `does not declare min game version` WARN。依据：双分支编译期 API 门禁在 v0.107.1 与 v0.111.0 均通过。描述里的「适配 STS2 0.107」当前是准确的（正式版即 0.107.1），等 v0.111.0 也跑过再考虑改成「0.107.1+ / 0.111.x」口径。
-2. `docs/DESIGN.md` 与实现脱节：仍写「不做卡牌黑名单」、`affects_gameplay: true`。**实现是对的**——`affects_gameplay` 必须保持 `false`（v0.111.0 用它决定是否参与联机内容哈希与 `ContentSorter` 排序；本 mod 不注册 model、不发网络消息）。
-3. 0.3.0 从未打包；下次发布要重建 `torelease/` 并归档 `release/MerchantBlacklist_v0.3.0.zip`。
+2. ✅ `docs/DESIGN.md` 已与实现对齐：文首加了「与本稿写作时的差异」小节（卡牌 ban 已实现、`affects_gameplay` 为 `false`、两层黑名单、UI 待重做），修正了 `affects_gameplay: true` 与「不做卡牌黑名单」两处，并补上两条已核实的联机事实（`RewardObtainedMessage` 只带完整 model 无索引；卡牌奖励是索引型同步故明确不做）。**实现是对的** —— `affects_gameplay` 必须保持 `false`（v0.111.0 用它决定是否参与联机内容哈希与 `ContentSorter` 排序）。
+3. ✅ `README.md` 已与实现对齐（2026-10-04）：
+   - 补上 v0.3.0 的**卡牌 ban** 与卡牌页签 —— 此前 README 完全没提这个已上线的功能；
+   - **修正依赖口径**：RitsuLib / ModConfig 都只是**可选**（`BlacklistInputNode` 有保底轮询，两样都不装时 `F10` 照常工作），原文把 RitsuLib 写成了必需安装步骤；
+   - 安装说明不再钉死过期的 `MerchantBlacklist_v0.1.0.zip`；改键路径补上 RitsuLib 设置页；
+   - 版本口径改为 `0.107.1 and newer`（与 `min_game_version: 0.107.1` 一致），并注明已在 0.107.1 / 0.111.0 上核实 API 兼容；
+   - 语言支持改为准确表述：面板支持中文（任意 `zh*`，文案为简体）/ English，繁体只存在于设置项（`_IsChinese()` 对任意 `zh*` 都返回 true，面板只有一套简体文案 —— 原「支持繁体」是过度声明）。
+4. ✅ 停止跟踪 `mod-uploader.log`（工坊上传器写的临时日志，不属于源码）：加进 `.gitignore` 并 `git rm --cached`。
+5. ⏳ 0.3.0 从未打包；下次发布要重建 `torelease/` 并归档 `release/MerchantBlacklist_v0.3.0.zip`。**发布前记得**：`mod_manifest.json` 的 description 与 `_workshop_workspaces/ShopBlacklist/workshop.json` 的文案要同步（description 里「适配 STS2 0.107」可与 `min_game_version: 0.107.1` 对齐成「0.107.1+」）。
 
 **C. 面板 UI 重构（前置调研已完成，等方向确认）**
 
