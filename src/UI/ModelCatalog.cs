@@ -26,6 +26,17 @@ internal static class ModelCatalog
         public string PoolName;
         /// <summary>卡池是否为无色池。取自 CardPoolModel.IsColorless（权威判定），不要用池名做字符串匹配。</summary>
         public bool IsColorless;
+
+        /// <summary>卡牌费用（-1 = 未知或不适用）。走公开链 CardModel.EnergyCost → CardEnergyCost.Canonical。</summary>
+        public int CardCost = -1;
+
+        /// <summary>卡牌描述（LocString 原件）。惰性解析，避免拖慢整个目录的构建。</summary>
+        public object DescriptionLoc;
+
+        private string _description;
+
+        /// <summary>解析后的卡牌描述文本（首次访问才解析）。</summary>
+        public string Description => _description ??= (ResolveLocText(DescriptionLoc) ?? string.Empty);
     }
 
     private static List<Entry> _relics;
@@ -216,6 +227,7 @@ internal static class ModelCatalog
         var rarityProp = _cardModelType.GetProperty("Rarity");
         var typeProp = _cardModelType.GetProperty("Type");
         var poolProp = _cardModelType.GetProperty("Pool");
+        var descProp = _cardModelType.GetProperty("Description");
         var entryProp = _modelIdType.GetProperty("Entry");
 
         // 卡池维度统一从 CardPoolModel 基类取一次，不再按具体运行时类型反复 GetProperty。
@@ -277,6 +289,8 @@ internal static class ModelCatalog
                     CardType = cardTypeName,
                     PoolName = poolName,
                     IsColorless = isColorless,
+                    CardCost = ReadCardCost(model),
+                    DescriptionLoc = descProp?.GetValue(model),
                 });
             }
             catch (Exception ex)
@@ -294,6 +308,20 @@ internal static class ModelCatalog
             return c != 0 ? c : string.Compare(a.Id, b.Id, StringComparison.Ordinal);
         });
         return list;
+    }
+
+    /// <summary>读卡牌费用：CardModel.EnergyCost（public）→ CardEnergyCost.Canonical（public int）。</summary>
+    private static int ReadCardCost(object card)
+    {
+        if (card == null) return -1;
+        try
+        {
+            var energyCost = card.GetType().GetProperty("EnergyCost")?.GetValue(card);
+            if (energyCost == null) return -1;
+            var canonical = energyCost.GetType().GetProperty("Canonical")?.GetValue(energyCost);
+            return canonical is int value ? value : -1;
+        }
+        catch { return -1; }
     }
 
     private static Texture2D SafeLoadTexture(PropertyInfo prop, object model)
