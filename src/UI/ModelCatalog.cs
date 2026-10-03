@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Reflection;
 using Godot;
+using MerchantBlacklist.Core;
 
 namespace MerchantBlacklist.UI;
 
@@ -210,7 +211,7 @@ internal static class ModelCatalog
         if (models == null || _cardModelType == null) return list;
 
         var idProp = _cardModelType.GetProperty("Id");
-        var titleProp = _cardModelType.GetProperty("TitleLocString");
+        var titleProp = _cardModelType.GetProperty("Title");
         var rarityProp = _cardModelType.GetProperty("Rarity");
         var typeProp = _cardModelType.GetProperty("Type");
         var poolProp = _cardModelType.GetProperty("Pool");
@@ -236,10 +237,38 @@ internal static class ModelCatalog
                     poolType.Contains("Quest") || poolType.Contains("Deprecated"))
                     continue;
 
-                // 角色卡和无色卡都保留；非商店池已上面排除。
-
                 var poolTitleProp = pool.GetType().GetProperty("Title");
                 var poolName = poolTitleProp?.GetValue(pool)?.ToString() ?? string.Empty;
+
+                // 角色过滤：ActiveCategory=角色ID时只显示该角色卡+无色卡
+                var activeCategory = BlacklistStore.ActiveCategory;
+                if (activeCategory != "GLOBAL" && !string.IsNullOrEmpty(activeCategory))
+                {
+                    bool isColorlessPool = poolType.Contains("Colorless");
+                    if (isColorlessPool)
+                    {
+                        // 无色卡始终保留
+                    }
+                    else
+                    {
+                        bool isCurrentCharPool = false;
+                        foreach (var charId in CharacterDetector.KnownCharacters)
+                        {
+                            if (charId == activeCategory)
+                            {
+                                var displayName = CharacterDetector.GetCharacterDisplayName(charId);
+                                if (poolName != null &&
+                                    (poolName.Contains(displayName, StringComparison.OrdinalIgnoreCase) ||
+                                     poolName.Contains(charId, StringComparison.OrdinalIgnoreCase)))
+                                {
+                                    isCurrentCharPool = true;
+                                    break;
+                                }
+                            }
+                        }
+                        if (!isCurrentCharPool) continue;
+                    }
+                }
 
                 var rarity = rarityProp?.GetValue(model);
                 var rarityName = rarity?.ToString() ?? string.Empty;
@@ -250,7 +279,7 @@ internal static class ModelCatalog
                 list.Add(new Entry
                 {
                     Id = entryId,
-                    Title = ResolveLocText(titleProp?.GetValue(model)) ?? entryId,
+                    Title = (titleProp?.GetValue(model) as string) ?? entryId,
                     Icon = null,
                     Rarity = rarityName,
                     RarityOrder = RarityOrderCard(rarityName),

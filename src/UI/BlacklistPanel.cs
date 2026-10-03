@@ -687,7 +687,7 @@ public partial class BlacklistPanel : CanvasLayer
         _content.AddChild(toolbar);
 
         var searchLabel = new Label { Text = _Loc("搜索:", "Search:") };
-        searchLabel.AddThemeFontSizeOverride("font_size", 13);
+        searchLabel.AddThemeFontSizeOverride("font_size", 16);
         searchLabel.AddThemeColorOverride("font_color", new Color(0.6f, 0.55f, 0.42f, 1f));
         toolbar.AddChild(searchLabel);
 
@@ -781,14 +781,34 @@ public partial class BlacklistPanel : CanvasLayer
         sectionVBox.AddThemeConstantOverride("separation", 6);
         _content.AddChild(sectionVBox);
 
+        var headerRow = new HBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+        headerRow.AddThemeConstantOverride("separation", 10);
+        sectionVBox.AddChild(headerRow);
+
         var header = new Label
         {
             Text = $"  {title}  ({list.Count})",
             SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
         };
         header.AddThemeColorOverride("font_color", new Color(0.75f, 0.65f, 0.45f, 1f));
-        header.AddThemeFontSizeOverride("font_size", 16);
-        sectionVBox.AddChild(header);
+        header.AddThemeFontSizeOverride("font_size", 18);
+        headerRow.AddChild(header);
+
+        var allowAllBtn = _MakeGroupActionButton(_Loc("全启用", "Allow all"), new Color(0.45f, 0.85f, 0.55f, 1f));
+        allowAllBtn.Pressed += () => _OnCardGroupBulk(list, ban: false);
+        headerRow.AddChild(allowAllBtn);
+
+        var banAllBtn = _MakeGroupActionButton(_Loc("全 ban", "Ban all"), new Color(1f, 0.45f, 0.45f, 1f));
+        banAllBtn.Pressed += () => _OnCardGroupBulk(list, ban: true);
+        headerRow.AddChild(banAllBtn);
+
+        var divider = new ColorRect
+        {
+            Color = new Color(0.55f, 0.42f, 0.22f, 0.4f),
+            CustomMinimumSize = new Vector2(0, 1),
+            MouseFilter = Control.MouseFilterEnum.Ignore,
+        };
+        sectionVBox.AddChild(divider);
 
         // 按稀有度分组
         foreach (var rarity in CardGroups)
@@ -804,7 +824,7 @@ public partial class BlacklistPanel : CanvasLayer
                 Text = $"  {_LocRarity(rarity)}  ·  {bannedHere}/{group.Count}",
             };
             groupLabel.AddThemeColorOverride("font_color", _RarityColor(rarity));
-            groupLabel.AddThemeFontSizeOverride("font_size", 14);
+            groupLabel.AddThemeFontSizeOverride("font_size", 16);
             sectionVBox.AddChild(groupLabel);
 
             foreach (var entry in group)
@@ -816,6 +836,17 @@ public partial class BlacklistPanel : CanvasLayer
         return sectionBanned;
     }
 
+    private void _OnCardGroupBulk(List<ModelCatalog.Entry> list, bool ban)
+    {
+        bool changed = false;
+        foreach (var e in list)
+        {
+            if (ban) changed |= BlacklistStore.AddCard(e.Id);
+            else changed |= _RemoveCard(e.Id);
+        }
+        if (changed) _RefreshContent();
+    }
+
     private Control _MakeCardRow(ModelCatalog.Entry entry, bool banned)
     {
         var row = new Button
@@ -825,7 +856,7 @@ public partial class BlacklistPanel : CanvasLayer
             FocusMode = Control.FocusModeEnum.None,
             ToggleMode = false,
             SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
-            CustomMinimumSize = new Vector2(0, 32),
+            CustomMinimumSize = new Vector2(0, 36),
         };
 
         var style = new StyleBoxFlat
@@ -858,7 +889,7 @@ public partial class BlacklistPanel : CanvasLayer
                 MouseFilter = Control.MouseFilterEnum.Ignore,
             };
             xLabel.AddThemeColorOverride("font_color", new Color(1f, 0.35f, 0.35f, 1f));
-            xLabel.AddThemeFontSizeOverride("font_size", 14);
+            xLabel.AddThemeFontSizeOverride("font_size", 18);
             hbox.AddChild(xLabel);
         }
 
@@ -880,7 +911,7 @@ public partial class BlacklistPanel : CanvasLayer
             MouseFilter = Control.MouseFilterEnum.Ignore,
             ClipText = true,
         };
-        nameLabel.AddThemeFontSizeOverride("font_size", 13);
+        nameLabel.AddThemeFontSizeOverride("font_size", 18);
         nameLabel.AddThemeColorOverride("font_color",
             banned ? new Color(0.85f, 0.45f, 0.45f, 1f) : new Color(0.95f, 0.88f, 0.72f, 1f));
         if (banned)
@@ -898,7 +929,7 @@ public partial class BlacklistPanel : CanvasLayer
                 Text = _LocCardType(entry.CardType),
                 MouseFilter = Control.MouseFilterEnum.Ignore,
             };
-            typeLabel.AddThemeFontSizeOverride("font_size", 11);
+            typeLabel.AddThemeFontSizeOverride("font_size", 14);
             typeLabel.AddThemeColorOverride("font_color", _CardTypeColor(entry.CardType));
             hbox.AddChild(typeLabel);
         }
@@ -909,29 +940,161 @@ public partial class BlacklistPanel : CanvasLayer
             Text = entry.Id,
             MouseFilter = Control.MouseFilterEnum.Ignore,
         };
-        idLabel.AddThemeFontSizeOverride("font_size", 10);
+        idLabel.AddThemeFontSizeOverride("font_size", 13);
         idLabel.AddThemeColorOverride("font_color", new Color(0.4f, 0.38f, 0.3f, 1f));
         hbox.AddChild(idLabel);
 
-        // hover tip
-        IDisposable hoverHandle = null;
+        // hover: 自建文字面板显示费用+描述
+        Control _cardPreviewNode = null;
+
         row.MouseEntered += () =>
         {
-            hoverHandle?.Dispose();
-            hoverHandle = NativeNodeFactory.ShowHoverTipForCard(row, entry.RawModel);
-        };
-        row.MouseExited += () =>
-        {
-            hoverHandle?.Dispose();
-            hoverHandle = null;
-        };
-        row.TreeExiting += () =>
-        {
-            hoverHandle?.Dispose();
-            hoverHandle = null;
+            _cardPreviewNode?.QueueFree();
+            _cardPreviewNode = null;
+
+            try
+            {
+                // 反射取 CardModel 的 Title / Description / CanonicalEnergyCost
+                var model = entry.RawModel;
+                var modelType = model.GetType();
+                var titleProp = modelType.GetProperty("Title");
+                var descProp = modelType.GetProperty("Description");
+                var costProp = modelType.GetProperty("CanonicalEnergyCost",
+                    System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+
+                string titleText = titleProp?.GetValue(model) as string ?? entry.Title ?? entry.Id;
+                string descText = "";
+                var descObj = descProp?.GetValue(model);
+                if (descObj != null)
+                {
+                    // Description 是 LocString，调 GetFormattedText()
+                    var descType = descObj.GetType();
+                    var fmtMethod = descType.GetMethod("GetFormattedText", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
+                    descText = fmtMethod?.Invoke(descObj, null) as string ?? "";
+                }
+                int cost = costProp != null ? (int)costProp.GetValue(model) : -1;
+
+                // 构建预览面板
+                var preview = new Godot.Panel
+                {
+                    CustomMinimumSize = new Vector2(300, 0),
+                };
+                var previewStyle = new Godot.StyleBoxFlat
+                {
+                    BgColor = new Color(0.08f, 0.06f, 0.04f, 0.97f),
+                    BorderColor = new Color(0.55f, 0.42f, 0.22f, 1f),
+                    BorderWidthLeft = 2, BorderWidthRight = 2, BorderWidthTop = 2, BorderWidthBottom = 2,
+                    CornerRadiusTopLeft = 8, CornerRadiusTopRight = 8, CornerRadiusBottomLeft = 8, CornerRadiusBottomRight = 8,
+                    ContentMarginLeft = 16, ContentMarginRight = 16, ContentMarginTop = 12, ContentMarginBottom = 12,
+                };
+                preview.AddThemeStyleboxOverride("panel", previewStyle);
+
+                var vbox = new Godot.VBoxContainer
+                {
+                    SizeFlagsHorizontal = Godot.Control.SizeFlags.ExpandFill,
+                    MouseFilter = Godot.Control.MouseFilterEnum.Ignore,
+                };
+                vbox.AddThemeConstantOverride("separation", 8);
+                preview.AddChild(vbox);
+
+                // 费用 + 标题行
+                var costTitleRow = new Godot.HBoxContainer
+                {
+                    SizeFlagsHorizontal = Godot.Control.SizeFlags.ExpandFill,
+                    MouseFilter = Godot.Control.MouseFilterEnum.Ignore,
+                };
+                costTitleRow.AddThemeConstantOverride("separation", 10);
+
+                string costDisplay = cost switch
+                {
+                    -1 => "?",
+                    _ when costProp == null => "?",
+                    _ => cost.ToString(),
+                };
+                var costLabel = new Godot.Label
+                {
+                    Text = costDisplay,
+                    MouseFilter = Godot.Control.MouseFilterEnum.Ignore,
+                };
+                costLabel.AddThemeFontSizeOverride("font_size", 22);
+                costLabel.AddThemeColorOverride("font_color", cost == 0 ? new Color(0.45f, 0.85f, 0.55f, 1f) : new Color(1f, 0.55f, 0.3f, 1f));
+                costTitleRow.AddChild(costLabel);
+
+                var titleLabel = new Godot.Label
+                {
+                    Text = titleText,
+                    SizeFlagsHorizontal = Godot.Control.SizeFlags.ExpandFill,
+                    MouseFilter = Godot.Control.MouseFilterEnum.Ignore,
+                };
+                titleLabel.AddThemeFontSizeOverride("font_size", 20);
+                titleLabel.AddThemeColorOverride("font_color", new Color(1f, 0.92f, 0.78f, 1f));
+                costTitleRow.AddChild(titleLabel);
+
+                vbox.AddChild(costTitleRow);
+
+                // 类型 + 稀有度行
+                var typeRarityRow = new Godot.Label
+                {
+                    Text = $"{_LocCardType(entry.CardType)}  ·  {_LocRarity(entry.Rarity)}",
+                    MouseFilter = Godot.Control.MouseFilterEnum.Ignore,
+                };
+                typeRarityRow.AddThemeFontSizeOverride("font_size", 14);
+                typeRarityRow.AddThemeColorOverride("font_color", new Color(0.6f, 0.55f, 0.42f, 1f));
+                vbox.AddChild(typeRarityRow);
+
+                // 分隔线
+                vbox.AddChild(new Godot.ColorRect
+                {
+                    Color = new Color(0.55f, 0.42f, 0.22f, 0.4f),
+                    CustomMinimumSize = new Vector2(0, 1),
+                    MouseFilter = Godot.Control.MouseFilterEnum.Ignore,
+                });
+
+                // 描述
+                var descLabel = new Godot.Label
+                {
+                    Text = descText,
+                    SizeFlagsHorizontal = Godot.Control.SizeFlags.ExpandFill,
+                    MouseFilter = Godot.Control.MouseFilterEnum.Ignore,
+                    AutowrapMode = Godot.TextServer.AutowrapMode.WordSmart,
+                    CustomMinimumSize = new Vector2(270, 0),
+                };
+                descLabel.AddThemeFontSizeOverride("font_size", 15);
+                descLabel.AddThemeColorOverride("font_color", new Color(0.88f, 0.82f, 0.68f, 1f));
+                vbox.AddChild(descLabel);
+
+                // 定位到面板右侧
+                var panelGlobalPos = _window.GlobalPosition;
+                var panelSize = _window.Size;
+                preview.Position = new Vector2(panelGlobalPos.X + panelSize.X + 10, panelGlobalPos.Y + 40);
+
+                // 确保渲染层级
+                preview.ZAsRelative = false;
+                preview.ZIndex = 4096;
+
+                AddChild(preview);
+                _cardPreviewNode = preview;
+            }
+            catch (System.Exception ex)
+            {
+                MerchantBlacklistLog.Warn($"Card hover preview failed: {ex.Message}");
+            }
         };
 
-        row.Pressed += () => _OnCardCellClicked(entry);
+        row.MouseExited += () =>
+        {
+            _cardPreviewNode?.QueueFree();
+            _cardPreviewNode = null;
+        };
+
+        row.TreeExiting += () =>
+        {
+            _cardPreviewNode?.QueueFree();
+            _cardPreviewNode = null;
+        };
+
+        row.Pressed += () =>
+        _OnCardCellClicked(entry);
         return row;
     }
 
