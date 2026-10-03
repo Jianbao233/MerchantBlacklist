@@ -153,7 +153,14 @@ internal static class SelfTest
             WaitSteps(8, () =>
             {
                 UI.BlacklistPanel.RunSelfTestAsyncPassReport();
-                Finish();
+
+                // 最后再验一次「用户真实路径」：Toggle() → EnsureCreated → CallDeferred(AddChild)
+                UI.BlacklistPanel.RunSelfTestHotkeyPassBegin();
+                WaitSteps(3, () =>
+                {
+                    UI.BlacklistPanel.RunSelfTestHotkeyPassReport();
+                    Finish();
+                });
             });
             return;
         }

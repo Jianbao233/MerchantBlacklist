@@ -1914,6 +1914,33 @@ public partial class BlacklistPanel : CanvasLayer
         MerchantBlacklistLog.Info("[SelfTest] async pass done.");
     }
 
+    // ── 真实热键路径的自检（走 EnsureCreated + CallDeferred(_ToggleSelf)，与用户按 F10 完全同路）──
+    internal static void RunSelfTestHotkeyPassBegin()
+    {
+        MerchantBlacklistLog.Info("[SelfTest] hotkey pass: 调用 BlacklistPanel.Toggle()（真实入口）…");
+        Toggle();
+    }
+
+    internal static void RunSelfTestHotkeyPassReport()
+    {
+        var p = GodotObject.IsInstanceValid(_instance) ? _instance : null;
+        if (p == null)
+        {
+            MerchantBlacklistLog.Error("[SelfTest] hotkey pass FAILED: 单例没有建立");
+            return;
+        }
+        bool windowOk = p._window != null && GodotObject.IsInstanceValid(p._window);
+        MerchantBlacklistLog.Info(
+            $"[SelfTest] hotkey pass: instance=ok window={(windowOk ? "ok" : "NULL")} " +
+            $"visible={p._isVisible} cells={p._allRelicCells.Count}+{p._allPotionCells.Count} " +
+            $"attached={p._attachedCells} cards={p._cards.Count} colorless={p._cards.Count(c => c.IsColorless)}");
+        if (!windowOk || !p._isVisible)
+            MerchantBlacklistLog.Error("[SelfTest] hotkey pass FAILED: 面板没打开");
+        else
+            MerchantBlacklistLog.Info("[SelfTest] hotkey pass OK: 面板经真实入口成功打开");
+        HidePanel();
+    }
+
     private void _SelfTestReport(string stage)
     {
         int relicCells = _allRelicCells.Count;
