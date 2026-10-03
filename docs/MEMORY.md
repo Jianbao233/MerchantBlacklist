@@ -71,7 +71,27 @@ dotnet build -c Debug -p:Sts2SdkDir="D:\A-Developing\tools\sts2_sdk_by_version\v
 `SaveManager.Instance.MarkPotionAsSeen`、`PotionFactory.CreateRandomPotionOutOfCombat`、
 `ModManifest.{id,version,affectsGameplay,minGameVersion,dependencies}`。
 
-**方式二 · 交叉核对反编译文本**
+**方式二 · 离线算「面板应该显示多少项」**
+
+`main/sts2/tools/MerchantBlacklistVerify/PoolExtractor/`：不启动游戏，直接从 `sts2.dll` 的 IL 读出
+各卡池 `GenerateAllCards()` 的内容与各模型的稀有度，按 `CardModel.Pool` 的解析规则（`AllCardPools` 里
+**第一个**包含该卡的池，顺序敏感）算出面板期望值：
+
+| 构建 | 遗物 | 药水 | 卡牌页签 | 角色卡 | 无色卡 |
+|---|---|---|---|---|---|
+| `v0.111.0+build24724944`（当前安装） | 145 | 60 | 519 | 454 | **65** |
+
+**方法可信度**：在重发前的旧构建上算出 `relics=145 / potions=60`，与 mod 真实运行日志实测值**逐个吻合**；
+卡牌类总数 596 也与 GDRE 快照 `Cards/` 目录的 596 个 `.cs` 一致。
+**无色卡 65 是关键判据** —— 修复前 `PoolName.Contains("Colorless")` 大小写敏感恒为 false，
+「无色卡」分组永远是空的，那 65 张会被错误归进「角色卡」。
+
+> 为什么必须离线算：运行时探针（独立进程里加载游戏程序集直接问 `ModelDb`）**走不通** ——
+> `ModelDb` 的内容注册在游戏启动流程里（游戏外是空的，抛 `KeyNotFoundException`），
+> 而 `LocManager.Initialize()` / `SaveManager` 会走到 Godot 原生调用，**0xC0000005 硬崩且 try/catch 拦不住**。
+> 游戏更新后重跑 PoolExtractor 即可刷新期望值。
+
+**方式三 · 交叉核对反编译文本**
 
 `tools/Tools/sts.dll历史存档/sts2_decompiled_v0.111.0_20260814/`（beta）与
 `docs/archive/历代版本源码/SL2_v0.107.1/src/`（正式版，GDRE 快照）。已确认两个分支的卡池类名、`Title` 取值
