@@ -1294,6 +1294,18 @@ public partial class BlacklistPanel : CanvasLayer
         };
     }
 
+    /// <summary>
+    /// 把原生节点的**整棵子树**设为鼠标穿透。
+    /// 只设根节点不够：`NRelic` / `NPotion` 内部还有子控件（默认 `MouseFilter = Stop`），
+    /// 它们会吃掉左键，外层 Button 的 `Pressed` 永远不触发 —— 实测表现就是
+    /// **"药水 / 遗物左键点了没反应"**（而卡牌行没有嵌原生节点，所以卡牌是好的）。
+    /// </summary>
+    private static void _MakeMouseTransparent(Node node)
+    {
+        if (node is Control c) c.MouseFilter = Control.MouseFilterEnum.Ignore;
+        foreach (var child in node.GetChildren()) _MakeMouseTransparent(child);
+    }
+
     private Control _MakeIconHost(Kind kind, ModelCatalog.Entry entry)
     {
         var host = new Control
@@ -1314,7 +1326,7 @@ public partial class BlacklistPanel : CanvasLayer
 
         if (nativeNode is Control nativeCtrl)
         {
-            nativeCtrl.MouseFilter = Control.MouseFilterEnum.Ignore;
+            _MakeMouseTransparent(nativeCtrl);
             nativeCtrl.SetAnchorsPreset(Control.LayoutPreset.Center);
             nativeCtrl.OffsetLeft = -IconSize / 2f;
             nativeCtrl.OffsetTop = -IconSize / 2f;
@@ -1383,6 +1395,14 @@ public partial class BlacklistPanel : CanvasLayer
 
     private bool _CardMatches(ModelCatalog.Entry c)
     {
+        // 角色层：只显示该角色**能拿到**的卡 —— 该角色卡池 + 无色池。
+        // 无色卡在任意角色的商店里都可能出现，所以角色层也要能 ban 它们。
+        // （池名是小写如 "ironclad"，层名是大写如 "IRONCLAD"，用 OrdinalIgnoreCase 对齐）
+        var layer = _LayerKey();
+        if (layer != "GLOBAL" && !c.IsColorless &&
+            !string.Equals(c.PoolName, layer, StringComparison.OrdinalIgnoreCase))
+            return false;
+
         if (_bannedOnly && !_ActiveBanned(Kind.Card, c.Id)) return false;
         if (_typeFilter.Count > 0 && !_typeFilter.Contains(c.CardType)) return false;
         if (_cardRarityFilter.Count > 0 && !_cardRarityFilter.Contains(c.Rarity)) return false;
@@ -1563,15 +1583,67 @@ public partial class BlacklistPanel : CanvasLayer
                 node.AcceptEvent();
             }
         };
-        node.MouseEntered += () =>
+        node.MouseEntered += () => _BeginCardHover(node, row.CardId, row.Name);
+        node.MouseExited += () =>
         {
-            _cardActiveId = row.CardId;
-            var entry = _cards.FirstOrDefault(c => c.Id == row.CardId);
-            if (entry != null) _ShowCardPreview(entry, node);
+            _nativeCardTip?.Dispose();
+            _nativeCardTip = null;
+            _HideCardPreview();
         };
-        node.MouseExited += _HideCardPreview;
         return row;
     }
+
+    private IDisposable _nativeCardTip;
+
+    /// <summary>
+    /// 卡牌悬停：优先用**游戏原生卡牌浮窗**（`HoverTipFactory.FromCard` → `CardHoverTip` →
+    /// `NHoverTipCardContainer` 画出卡牌本体 + 关键字提示）；只有反射没解析到才退回自绘预览。
+    /// 抽成方法是为了让截图自检能走**和真实鼠标悬停完全同一条**代码路径。
+    /// </summary>
+    private void _BeginCardHover(Control owner, string cardId, Control anchor = null)
+    {
+        if (owner == null || string.IsNullOrEmpty(cardId)) return;
+        _cardActiveId = cardId;
+        var entry = _cards.FirstOrDefault(c => c.Id == cardId);
+        if (entry == null) return;
+
+        _nativeCardTip?.Dispose();
+        // 锚点用**名称列**而不是整行：卡牌行几乎占满面板宽度，贴整行右侧会跑到面板外；
+        // 名称列右侧正好是我腾出来的空白区，浮窗落在那里既在面板内也不挡关键信息。
+        _nativeCardTip = NativeNodeFactory.ShowCardHoverTip(owner, entry.RawModel, anchor ?? owner);
+        if (_nativeCardTip == null)
+        {
+            _hoverPath = "custom-preview";
+            _ShowCardPreview(entry, owner);
+        }
+        else
+        {
+            _hoverPath = "native-card-tip";
+        }
+    }
+
+    /** 递归打印浮窗子树（限深 3 层，避免刷屏）*/
+    private static void _LogTipChildren(Node node, int depth)
+    {
+        if (node == null || depth > 3) return;
+        foreach (var child in node.GetChildren())
+        {
+            if (child is Control c)
+            {
+                MerchantBlacklistLog.Info(
+                    $"[SelfTest] tip  {new string(' ', depth * 2)}{c.GetType().Name} name={c.Name} " +
+                    $"vis={c.Visible} inTreeVis={c.IsVisibleInTree()} size={c.Size} pos={c.Position} " +
+                    $"mod={c.Modulate} kids={c.GetChildCount()}");
+            }
+            else
+            {
+                MerchantBlacklistLog.Info($"[SelfTest] tip  {new string(' ', depth * 2)}{child.GetType().Name} name={child.Name}");
+            }
+            _LogTipChildren(child, depth + 1);
+        }
+    }
+
+    private string _hoverPath = "none";
 
     private void _BindRow(Row row, FlatRow model)
     {
@@ -1727,7 +1799,7 @@ public partial class BlacklistPanel : CanvasLayer
         _categoryLabel.Text = isGlobal ? _Loc("全局层", "Global layer") : _Loc($"{name} 角色层", $"{name} layer");
         _catNote.Text = isGlobal
             ? _Loc("全局层对所有角色生效", "Applies to every character")
-            : _Loc($"只对 {name} 生效，与全局层取并集", $"Applies to {name} only, unioned with global");
+            : _Loc($"只对 {name} 生效 · 卡牌只列其卡池与无色卡", $"Applies to {name} only · cards limited to its pool + colorless");
         if (_legendInherited != null) _legendInherited.Visible = !isGlobal;
     }
 
@@ -2213,9 +2285,12 @@ public partial class BlacklistPanel : CanvasLayer
             case 2:     // 卡牌页签（文字列表）
                 p._SetPoseTab(Tab.Cards);
                 return true;
-            case 3:     // 卡牌 + 悬停预览
-                p._ShowPreviewAt(new Vector2(p._window.Size.X * 0.44f, 200f));
-                return true;
+            case 3:     // 卡牌 + 原生悬停浮窗（走真实 hover 路径）
+                {
+                    var row = p._rowPool.Values.FirstOrDefault(r => !r.IsHeader && r.CardId != null);
+                    if (row != null) p._BeginCardHover(row.Node, row.CardId, row.Name);
+                    return true;
+                }
             case 4:     // 卡牌 + 搜索（过滤 + 命中高亮）
                 p._HideCardPreview();
                 p._cardQuery = "打击";
@@ -2258,6 +2333,14 @@ public partial class BlacklistPanel : CanvasLayer
                     p._gridBannedOnly.AddThemeColorOverride("font_color", ColBan);
                 }
                 p._SetPoseTab(Tab.Relics);
+                p._PaintAll();
+                return true;
+            case 10:    // 角色层 + 卡牌页签：验证"只列该角色卡池 + 无色"
+                BlacklistStore.ActiveCategory = "IRONCLAD";
+                p._UpdateCategoryButtons();
+                p._bannedOnly = false;
+                if (p._gridBannedOnly != null) p._gridBannedOnly.ButtonPressed = false;
+                p._SetPoseTab(Tab.Cards);
                 p._PaintAll();
                 return true;
             default:
@@ -2358,6 +2441,34 @@ public partial class BlacklistPanel : CanvasLayer
             $"relicGridCols={grid?.Columns} cardRowsInWindow={_shotPanel._rowPool.Count} " +
             $"preview={(p._cardPreview != null ? $"{p._cardPreview.Size.X:F0}x{p._cardPreview.Size.Y:F0}" : "null")} " +
             $"confirm={(p._confirmOverlay != null ? p._confirmOverlay.Visible.ToString() : "null")}");
+        // 顺带把"格子级"的结构断言也打出来（鼠标穿透数、悬停走的哪条路径）
+        p._SelfTestReport($"cells/{stage}");
+
+        // 原生浮窗的几何诊断：创建成功但看不见时，靠这几项定位（尺寸为 0 / 不在树 / 位置在屏外）
+        var tip = NativeNodeFactory.LastTipNode;
+        if (tip != null && GodotObject.IsInstanceValid(tip))
+        {
+            var tr = tip.GetGlobalRect();
+            MerchantBlacklistLog.Info(
+                $"[SelfTest] tip/{stage}: type={tip.GetType().Name} inTree={tip.IsInsideTree()} " +
+                $"visibleInTree={tip.IsVisibleInTree()} size={tip.Size} pos={tip.Position} " +
+                $"rect=({tr.Position.X:F0},{tr.Position.Y:F0} {tr.Size.X:F0}x{tr.Size.Y:F0}) " +
+                $"parent={tip.GetParent()?.Name} children={tip.GetChildCount()} " +
+                $"modulate={tip.Modulate} selfModulate={tip.SelfModulate} z={tip.ZIndex} topLevel={tip.TopLevel}");
+            // 子节点逐层列出：浮窗"存在但看不见"时，靠这个看是尺寸为 0、还是透明度为 0、还是内容没建出来
+            _LogTipChildren(tip, 0);
+            // 内容容器的最终全局矩形（判断有没有落在面板内）
+            if (tip.FindChild("cardHoverTipContainer", true, false) is Control cc)
+            {
+                var cr = cc.GetGlobalRect();
+                MerchantBlacklistLog.Info(
+                    $"[SelfTest] tip content/{stage}: cardContainer rect=({cr.Position.X:F0},{cr.Position.Y:F0} {cr.Size.X:F0}x{cr.Size.Y:F0})");
+            }
+        }
+        else
+        {
+            MerchantBlacklistLog.Info($"[SelfTest] tip/{stage}: none");
+        }
     }
 
     private void _OnWindowResized()
@@ -2397,11 +2508,25 @@ public partial class BlacklistPanel : CanvasLayer
         int colorless = _cards.Count(c => c.IsColorless);
         int relicVisible = _allRelicCells.Count(c => c.Node.Visible);
         int potionVisible = _allPotionCells.Count(c => c.Node.Visible);
+        // 结构性断言：原生图标的整棵子树必须都是鼠标穿透，否则外层 Button 收不到左键
+        int blockingDescendants = 0;
+        foreach (var cell in _allRelicCells.Concat(_allPotionCells))
+            blockingDescendants += _CountMouseBlockers(cell.IconHost);
         MerchantBlacklistLog.Info(
             $"[SelfTest] panel/{stage}: relics={_relics.Count}(cells={relicCells},visible={relicVisible}) " +
             $"potions={_potions.Count}(cells={potionCells},visible={potionVisible}) cards={_cards.Count} " +
             $"cardRows={cardRows}(pooled={pooled}) colorless={colorless} " +
             $"nativeIcons={_nativeIconCount} fallbackIcons={_fallbackIconCount} " +
+            $"mouseBlockers={blockingDescendants} hoverPath={_hoverPath} " +
             $"tab={_currentTab} syncBuilt={_syncBuilt}");
+    }
+
+    /** 统计子树里会吃掉鼠标事件的控件（正常应为 0） */
+    private static int _CountMouseBlockers(Node node)
+    {
+        if (node == null) return 0;
+        int n = (node is Control c && c.MouseFilter != Control.MouseFilterEnum.Ignore) ? 1 : 0;
+        foreach (var child in node.GetChildren()) n += _CountMouseBlockers(child);
+        return n;
     }
 }

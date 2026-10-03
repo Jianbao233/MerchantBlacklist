@@ -298,6 +298,26 @@ main\sts2\tools\MerchantBlacklistVerify\run-visual-shots.ps1
 
 ---
 
+## 8.2 用户报的三个问题（2026-10-04，第三轮）
+
+| 用户反馈 | 根因 | 修法 |
+|---|---|---|
+| **切角色层时没有过滤非该角色的卡牌** | `_CardMatches` 完全没看当前层 | 角色层只列「该角色卡池 + 无色池」（池名小写 `ironclad` ↔ 层名大写 `IRONCLAD`，用 `OrdinalIgnoreCase`）。实测 IRONCLAD 层 `cardRows` 从 519 → **155**（90 + 65），分类栏说明文案同步改准 |
+| **药水/遗物左键点了没反应** | 只给原生节点**根**设了 `MouseFilter = Ignore`，`NRelic`/`NPotion` 内部的子控件（默认 `Stop`）把左键吃掉了 —— 卡牌行没有嵌原生节点所以是好的 | 加 `_MakeMouseTransparent()` **递归**设整棵子树；并加结构性断言 `mouseBlockers`（正常恒为 0） |
+| **卡牌悬停要游戏原生的卡牌浮窗** | 我原先自绘了一个预览框 | 改用原生：`HoverTipFactory.FromCard(card)`（→ `CardHoverTip` → `NHoverTipCardContainer` 用 `%Card` 渲染卡牌本体）+ `card.HoverTips`，交给**同一个** `NHoverTipSet.CreateAndShow`（遗物/药水走的就是它）。实测 `hoverPath=native-card-tip`，画面是带美术/费用/类型牌匾的原生卡牌，**动态数值（7 点伤害 ×7）也被原生正确解析**（自绘预览只能显示 `?`） |
+
+**原生卡牌浮窗踩的两个坑（都靠"浮窗子树逐层打印"定位）**：
+
+1. **`%Card` 节点必须手动给尺寸**。`scenes/ui/card_hover_tip.tscn` 里它的 offset 全设在中心点
+   （`offset_left = offset_right = 115`、`offset_top = offset_bottom = 157`，即 size = 0），靠
+   `grow_direction = BOTH` 在游戏自己的流程里撑开；reparent 之后它保持 0×0 →
+   表现是「容器尺寸正确、位置正确、画面上什么都没有」。兜底：`NCard.defaultSize × 节点 scale`（场景里 0.75 → 225×316.5）。
+2. **不能直接设浮窗容器的位置**。游戏给内部子容器算过相对偏移（实测 `cardHoverTipContainer` 在 221,374），
+   直接设外层位置会与之叠加、卡牌跑到下方偏右。正确做法：按**内容容器的实际全局矩形**反推位移。
+   这一修顺带修好了遗物/药水的原生 tooltip —— 它们同样经过 reparent，之前也是被摆在 (0,0)。
+
+---
+
 ## 9. 无头自检怎么跑（真机验证不再需要人按 F10）
 
 面板的 `ModelCatalog` 只在"打开过一次面板"时才建立，所以真机验证原本必须有人进游戏操作。
