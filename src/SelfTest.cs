@@ -38,6 +38,7 @@ internal static class SelfTest
 
     public static bool Enabled => _mode.Length > 0;
     public static bool Full => _mode == "full";
+    public static bool Shots => _mode == "shots";
 
     public static string FlagPath => Path.Combine(Path.GetTempPath(), FlagFileName);
 
@@ -50,6 +51,7 @@ internal static class SelfTest
             _mode = raw.Trim().ToLowerInvariant() switch
             {
                 "full" => "full",
+                "shots" or "shot" => "shots",
                 _ => "catalog",
             };
         }
@@ -142,6 +144,12 @@ internal static class SelfTest
         if (cards.Count > 0 && colorless == 0)
             MerchantBlacklistLog.Warn("[SelfTest] colorless=0 —— 「无色卡」分组会是空的（无色判定失效）");
 
+        if (Shots)
+        {
+            RunShotPass();
+            return;
+        }
+
         if (Full)
         {
             MerchantBlacklistLog.Info("[SelfTest] step: panel pass（同步构建）…");
@@ -177,9 +185,67 @@ internal static class SelfTest
         timer.Timeout += () => WaitSteps(n - 1, then);
     }
 
+    // ── 截图模式：逐个"摆姿势 → 等布局稳定 → 记录几何 → 截图" ──────────────
+    private static int _pose;
+    private static string _shotDir = "";
+
+    private static void RunShotPass()
+    {
+        _shotDir = Path.Combine(Path.GetTempPath(), "mb-shots");
+        MerchantBlacklistLog.Info($"[SelfTest] shots mode: output dir = {_shotDir}");
+        // 开场 logo 期间截图只能拍到 MegaCrit 标志（实测踩过），所以等主菜单真的起来
+        MerchantBlacklistLog.Info("[SelfTest] shots: 等主菜单就绪（最多 20 秒）…");
+        WaitForMainMenu(40, () =>
+        {
+            MerchantBlacklistLog.Info("[SelfTest] shots: 主菜单就绪（或等待超时），用真实入口显示面板。");
+            UI.BlacklistPanel.RunSelfTestShotPassBegin();
+            WaitSteps(3, NextPose);      // 留几帧让 CallDeferred(AddChild) 与布局都落定
+        });
+    }
+
+    /// <summary>等主菜单出现（找名字含 MainMenu 的节点）；超时也继续，避免卡死。</summary>
+    private static void WaitForMainMenu(int attemptsLeft, Action then)
+    {
+        if (attemptsLeft <= 0) { MerchantBlacklistLog.Warn("[SelfTest] shots: 等主菜单超时"); then(); return; }
+        var root = (Engine.GetMainLoop() as SceneTree)?.Root;
+        if (root != null && _FindByName(root, "MainMenu", 8) != null) { then(); return; }
+        WaitSteps(1, () => WaitForMainMenu(attemptsLeft - 1, then));
+    }
+
+    private static Node _FindByName(Node node, string token, int depth)
+    {
+        if (node == null || depth < 0) return null;
+        if (!string.IsNullOrEmpty(node.Name) &&
+            node.Name.ToString().Contains(token, StringComparison.OrdinalIgnoreCase)) return node;
+        foreach (var child in node.GetChildren())
+        {
+            var hit = _FindByName(child, token, depth - 1);
+            if (hit != null) return hit;
+        }
+        return null;
+    }
+
+    private static void NextPose()
+    {
+        if (!UI.BlacklistPanel.ApplySelfTestShotPose(_pose))
+        {
+            UI.BlacklistPanel.EndSelfTestShotPass();
+            Finish();
+            return;
+        }
+        int pose = _pose;
+        WaitSteps(2, () =>
+        {
+            UI.BlacklistPanel.ReportLayout($"pose{pose}");
+            UI.BlacklistPanel.CaptureSelfTest(Path.Combine(_shotDir, $"{pose:00}.png"));
+            _pose++;
+            NextPose();
+        });
+    }
+
     private static void Finish()
     {
-        if (!Full)
+        if (!Full && !Shots)
         {
             MerchantBlacklistLog.Info("[SelfTest] all done (catalog mode; game keeps running).");
             return;

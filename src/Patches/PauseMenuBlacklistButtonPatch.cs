@@ -139,21 +139,12 @@ internal static class PauseMenuBlacklistButtonPatch
         var sigName = ResolveReleasedSignalName(clone);
         if (string.IsNullOrEmpty(sigName)) return;
 
-        try
-        {
-            foreach (var dict in clone.GetSignalConnectionList(sigName))
-            {
-                if (dict.TryGetValue("callable", out var c) && c.Obj is Callable callable)
-                {
-                    clone.Disconnect(sigName, callable);
-                }
-            }
-        }
-        catch
-        {
-            // 旧连接清理失败不阻断；多绑一次最多日志噪声。
-        }
-
+        // 这里**不要**先尝试断开"继承来的旧连接"。
+        // 依据：duplicate 没带 DuplicateFlags.Signals，父菜单的连接本来就没被复制；连接表里
+        // 那一条是克隆节点自己的脚本在 _Ready 里做的自连接（视觉高亮用），必须保留。
+        // 之前那段"先 Disconnect 再 Connect"会让玩家每次打开暂停菜单时日志里多一条
+        // `Attempt to disconnect a nonexistent connection ... Released` 加一段 C# 回溯
+        // （在真实会话日志里实测到），纯噪声。
         var bridge = Callable.From<GodotObject>(_ => BlacklistPanel.Toggle());
         clone.Connect(sigName, bridge);
     }

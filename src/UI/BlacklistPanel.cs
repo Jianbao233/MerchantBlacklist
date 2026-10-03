@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using Godot;
 using MerchantBlacklist.Core;
@@ -50,8 +51,10 @@ public partial class BlacklistPanel : CanvasLayer
     private static readonly Color ColTextMute = new(0.44f, 0.40f, 0.32f);
     private static readonly Color ColBan = new(1f, 0.35f, 0.35f);
     private static readonly Color ColOk = new(0.44f, 0.82f, 0.55f);
-    private static readonly Color ColWindowBg = new(0.11f, 0.09f, 0.06f, 0.97f);
-    private static readonly Color ColBarBg = new(0.17f, 0.13f, 0.08f, 0.97f);
+    // 面板底色必须**完全不透明**：早先用 0.97，实测透射率约 9%，游戏里高亮的画面（主菜单 logo、
+    // 战斗背景）会以"鬼影"透出来，设置面板读起来很脏。0.97 在纸上只差 3%，但肉眼看得出来。
+    private static readonly Color ColWindowBg = new(0.11f, 0.09f, 0.06f, 1f);
+    private static readonly Color ColBarBg = new(0.17f, 0.13f, 0.08f, 1f);
     private static readonly Color ColCellBg = new(0.16f, 0.13f, 0.10f, 0.70f);
     private static readonly Color ColCellBgBanned = new(0.45f, 0.10f, 0.10f, 0.55f);
     private static readonly Color ColRowHover = new(0.55f, 0.42f, 0.22f, 0.13f);
@@ -108,7 +111,7 @@ public partial class BlacklistPanel : CanvasLayer
     private OptionButton _charCatBtn;
     private Label _catNote;
     private readonly Button[] _tabButtons = new Button[3];
-    private readonly Label[] _tabCounts = new Label[3];
+    private string[] _tabNames = { "遗物", "药水", "卡牌" };
 
     private Control _gridToolbar;
     private Control _cardToolbar;
@@ -160,6 +163,7 @@ public partial class BlacklistPanel : CanvasLayer
     private Tab _currentTab = Tab.Relics;
     private bool _builtOnce;
     private bool _isVisible;
+    private bool _sizedOnce;
     private bool _populating;
     private readonly HashSet<string> _rarityFilter = new();
     private readonly HashSet<string> _typeFilter = new();
@@ -253,7 +257,8 @@ public partial class BlacklistPanel : CanvasLayer
     public BlacklistPanel()
     {
         Name = "MerchantBlacklistPanel";
-        Layer = 100;
+        // 100 实测会被游戏 UI 盖住/穿透，抬到 1000 确保压在最上层
+        Layer = 1000;
         ProcessMode = Node.ProcessModeEnum.Always;
     }
 
@@ -274,6 +279,16 @@ public partial class BlacklistPanel : CanvasLayer
     {
         if (_window == null || !GodotObject.IsInstanceValid(_window)) _BuildUI();
         if (_window == null) return;
+        // 首次真正显示时才按真实视口定尺寸/居中（_Ready 时视口可能还是 0）
+        if (!_sizedOnce)
+        {
+            var (w, h) = _DefaultWindowSize();
+            _window.Size = new Vector2(w, h);
+            _CenterWindow();
+            _sizedOnce = true;
+            _ClampWindow();
+            _LayoutGridColumns();
+        }
         _AutoDetectCharacter();
         _window.Visible = true;
         _isVisible = true;
@@ -452,6 +467,31 @@ public partial class BlacklistPanel : CanvasLayer
         _ClampWindow();
     }
 
+    /// <summary>
+    /// 面板默认尺寸 / 居中位置。
+    /// 坑：`_Ready` 时视口可能还没尺寸（甚至节点还没入树），那时按视口夹紧会把窗口压成最小值
+    /// （实测：一建出来就是 620x460）。所以视口"还没准备好"时**不夹紧**，用理想默认值，
+    /// 等真正显示时（<see cref="_ShowSelf"/>）再按真实视口夹紧一次。
+    /// </summary>
+    private (float w, float h) _DefaultWindowSize()
+    {
+        var vp = GetViewport()?.GetVisibleRect().Size ?? Vector2.Zero;
+        bool viewportReady = vp.X >= MinWidth + 40f && vp.Y >= MinHeight + 40f;
+        if (!viewportReady) return (1000f, 700f);
+        float w = Mathf.Min(1000f, vp.X - 40f);
+        float h = Mathf.Min(700f, vp.Y - 40f);
+        return (Mathf.Max(MinWidth, w), Mathf.Max(MinHeight, h));
+    }
+
+    private void _CenterWindow()
+    {
+        var vp = GetViewport()?.GetVisibleRect().Size ?? Vector2.Zero;
+        if (vp.X < 10f || vp.Y < 10f) return;
+        _window.Position = new Vector2(
+            Mathf.Max(10f, (vp.X - _window.Size.X) / 2f),
+            Mathf.Max(10f, (vp.Y - _window.Size.Y) / 2f));
+    }
+
     private void _ClampWindow()
     {
         if (_window == null) return;
@@ -472,15 +512,11 @@ public partial class BlacklistPanel : CanvasLayer
         if (_builtOnce) return;
         _builtOnce = true;
 
-        var viewport = GetViewport()?.GetVisibleRect().Size ?? new Vector2(1920f, 1080f);
-        float w = Mathf.Clamp(1000f, MinWidth, Mathf.Max(MinWidth, viewport.X - 40f));
-        float h = Mathf.Clamp(700f, MinHeight, Mathf.Max(MinHeight, viewport.Y - 40f));
-
+        var (w, h) = _DefaultWindowSize();
         _window = new Panel
         {
             Name = "Window",
             Size = new Vector2(w, h),
-            Position = new Vector2(Mathf.Max(10f, (viewport.X - w) / 2f), Mathf.Max(10f, (viewport.Y - h) / 2f)),
             MouseFilter = Control.MouseFilterEnum.Stop,
         };
         var bgStyle = new StyleBoxFlat
@@ -491,7 +527,15 @@ public partial class BlacklistPanel : CanvasLayer
             CornerRadiusTopLeft = 8, CornerRadiusTopRight = 8, CornerRadiusBottomLeft = 8, CornerRadiusBottomRight = 8,
         };
         _window.AddThemeStyleboxOverride("panel", bgStyle);
+        _window.Resized += _OnWindowResized;
         AddChild(_window);
+
+        // 诊断：底色已是 alpha=1.0 但实测仍有 ~7% 透光（游戏画面以鬼影透出）。
+        // 这里把可能影响透明度的因素都打出来：层级、材质、modulate、主题实际取到的底色。
+        MerchantBlacklistLog.Info(
+            $"[SelfTest] window diag: layer={Layer} material={(_window.Material?.GetType().Name ?? "none")} " +
+            $"modulate={_window.Modulate} selfModulate={_window.SelfModulate} " +
+            $"bg={bgStyle.BgColor} hasThemePanel={_window.HasThemeStyleboxOverride("panel")}");
 
         var root = new VBoxContainer { Name = "Root" };
         root.SetAnchorsPreset(Control.LayoutPreset.FullRect);
@@ -621,19 +665,13 @@ public partial class BlacklistPanel : CanvasLayer
         for (int i = 0; i < defs.Length; i++)
         {
             int index = i;
+            // 计数直接写进按钮文本（早先做成独立 Label 挂在按钮旁边，视觉上像两个控件）
             var btn = new Button { Text = _Loc(defs[i].zh, defs[i].en), ToggleMode = true, ButtonPressed = i == 0 };
             btn.Pressed += () => _SwitchTab((Tab)index);
             bar.AddChild(btn);
             _tabButtons[i] = btn;
-
-            var cnt = new Label { Text = "" };
-            cnt.AddThemeFontSizeOverride("font_size", 11);
-            cnt.AddThemeColorOverride("font_color", ColTextMute);
-            row_add_cnt(bar, cnt);
-            _tabCounts[i] = cnt;
         }
-
-        static void row_add_cnt(Node parent, Label cnt) => parent.AddChild(cnt);
+        _tabNames = new[] { _Loc(defs[0].zh, defs[0].en), _Loc(defs[1].zh, defs[1].en), _Loc(defs[2].zh, defs[2].en) };
     }
 
     private void _BuildToolbars(Node parent)
@@ -649,14 +687,11 @@ public partial class BlacklistPanel : CanvasLayer
 
         foreach (var r in new[] { "Common", "Uncommon", "Rare", "Shop" })
         {
-            var chip = _MakeChip(_LocRarity(r), _RarityColor(r), out var dot);
-            _ = dot;
+            var chip = _MakeChip(_LocRarity(r), _RarityColor(r));
             chip.Pressed += () => { _ToggleFilter(_rarityFilter, r, chip); _PaintGrids(); };
             gridRow.AddChild(chip);
             _rarityChips[r] = chip;
         }
-
-        gridRow.AddChild(new Control { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill });
         _gridAllowAll = _MakeActionButton(gridRow, _Loc("全启用", "Allow all"), ColOk);
         _gridAllowAll.Pressed += () => _Bulk(_CurrentKind(), ban: false);
         _gridBanAll = _MakeActionButton(gridRow, _Loc("全 ban", "Ban all"), ColBan);
@@ -673,20 +708,18 @@ public partial class BlacklistPanel : CanvasLayer
 
         foreach (var t in new[] { "Attack", "Skill", "Power" })
         {
-            var chip = _MakeChip(_LocCardType(t), _CardTypeColor(t), out _);
+            var chip = _MakeChip(_LocCardType(t), _CardTypeColor(t));
             chip.Pressed += () => { _ToggleFilter(_typeFilter, t, chip); _RebuildCardRows(); };
             cardRow.AddChild(chip);
             _typeChips[t] = chip;
         }
         foreach (var r in new[] { "Common", "Uncommon", "Rare" })
         {
-            var chip = _MakeChip(_LocRarity(r), _RarityColor(r), out _);
+            var chip = _MakeChip(_LocRarity(r), _RarityColor(r));
             chip.Pressed += () => { _ToggleFilter(_cardRarityFilter, r, chip); _RebuildCardRows(); };
             cardRow.AddChild(chip);
             _cardRarityChips[r] = chip;
         }
-
-        cardRow.AddChild(new Control { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill });
         _cardAllowAll = _MakeActionButton(cardRow, _Loc("全启用", "Allow all"), ColOk);
         _cardAllowAll.Pressed += () => _Bulk(Kind.Card, ban: false);
         _cardBanAll = _MakeActionButton(cardRow, _Loc("全 ban", "Ban all"), ColBan);
@@ -695,7 +728,13 @@ public partial class BlacklistPanel : CanvasLayer
         _cardToolbar.Visible = false;
     }
 
-    private Control _BuildToolbarShell(Node parent, out HBoxContainer row)
+    /// <summary>
+    /// 工具条外壳。行用 <see cref="HFlowContainer"/> 而不是 HBoxContainer：
+    /// HBox 的最小宽度是子项之和，窄窗口下会把整块布局顶宽（实测 620 宽窗口里 pane 被撑到 649），
+    /// Flow 容器会把筛选块折到第二行，窄窗口也能用。
+    /// 代价：Flow 里没法用 Spacer 做右对齐，批量按钮就紧跟筛选块排列。
+    /// </summary>
+    private Control _BuildToolbarShell(Node parent, out HFlowContainer row)
     {
         var bar = new PanelContainer();
         var style = new StyleBoxFlat
@@ -707,8 +746,9 @@ public partial class BlacklistPanel : CanvasLayer
         };
         bar.AddThemeStyleboxOverride("panel", style);
         parent.AddChild(bar);
-        row = new HBoxContainer();
-        row.AddThemeConstantOverride("separation", 6);
+        row = new HFlowContainer();
+        row.AddThemeConstantOverride("h_separation", 6);
+        row.AddThemeConstantOverride("v_separation", 4);
         bar.AddChild(row);
         return bar;
     }
@@ -726,18 +766,18 @@ public partial class BlacklistPanel : CanvasLayer
         return edit;
     }
 
-    private Button _MakeChip(string text, Color tint, out Control dot)
+    /// <summary>
+    /// 筛选块。**不要**往 Button 里塞 HBox+Label —— Button 不是容器，子控件尺寸会是 0，
+    /// 实测结果是只看得见色点、文字完全不渲染。直接用 Button 自己的 Text + 字色。
+    /// </summary>
+    private Button _MakeChip(string text, Color tint)
     {
-        var btn = new Button { ToggleMode = true, ButtonPressed = true };
-        var row = new HBoxContainer { MouseFilter = Control.MouseFilterEnum.Ignore };
-        row.AddThemeConstantOverride("separation", 4);
-        var d = new ColorRect { Color = tint, CustomMinimumSize = new Vector2(7, 7), MouseFilter = Control.MouseFilterEnum.Ignore };
-        row.AddChild(d);
-        var lbl = new Label { Text = text, MouseFilter = Control.MouseFilterEnum.Ignore };
-        lbl.AddThemeFontSizeOverride("font_size", 11);
-        row.AddChild(lbl);
-        btn.AddChild(row);
-        dot = d;
+        var btn = new Button { Text = text, ToggleMode = true, ButtonPressed = true };
+        btn.AddThemeFontSizeOverride("font_size", 11);
+        btn.AddThemeColorOverride("font_color", tint);
+        btn.AddThemeColorOverride("font_pressed_color", tint);
+        btn.AddThemeColorOverride("font_hover_color", tint.Lightened(0.25f));
+        btn.TooltipText = text;
         return btn;
     }
 
@@ -994,7 +1034,10 @@ public partial class BlacklistPanel : CanvasLayer
 
         MerchantBlacklistLog.Info($"Panel catalog: relics={_relics.Count}, potions={_potions.Count}, cards={_cards.Count}.");
         _populating = true;
+        CallDeferred(nameof(_LayoutGridColumnsDeferred));
     }
+
+    private void _LayoutGridColumnsDeferred() => _LayoutGridColumns();
 
     private readonly Queue<Action> _pendingBuildSteps = new();
 
@@ -1302,6 +1345,7 @@ public partial class BlacklistPanel : CanvasLayer
         if (_cardScroll == null || _cardSizer == null) return;
         int scroll = (int)_cardScroll.ScrollVertical;
         int viewH = (int)_cardScroll.Size.Y;
+        float rowWidth = Mathf.Max(120f, _cardScroll.Size.X - 16f);   // 留出滚动条宽度
 
         int first = 0, last = _visibleCardRows.Count - 1, lo = 0, hi = _visibleCardRows.Count - 1;
         int minY = scroll - CardRowHeight * CardRowBuffer;
@@ -1334,6 +1378,12 @@ public partial class BlacklistPanel : CanvasLayer
                 _rowPool[i] = row;
             }
             _BindRow(row, model);
+
+            // 关键：行是 _cardSizer 的普通子节点，**必须自己摆位置**。
+            // 漏掉这一步的后果实测是所有行都堆在 (0,0) 重叠成一团（卡牌列表整片空白＋首行文字糊在一起）。
+            float rowH = model.IsHeader ? CardHeaderHeight : CardRowHeight;
+            row.Node.Position = new Vector2(0, model.Offset);
+            row.Node.Size = new Vector2(rowWidth, rowH);
         }
     }
 
@@ -1494,7 +1544,17 @@ public partial class BlacklistPanel : CanvasLayer
             header.Visible = n > 0;
             grid.Visible = n > 0;
             if (header.GetChildCount() > 1 && header.GetChild(1) is Label stat)
-                stat.Text = _Loc($"显示 {n}", $"{n} shown");
+            {
+                int bannedHere = 0;
+                foreach (var g in grid.GetChildren())
+                {
+                    if (g is not Button b || !b.Visible) continue;
+                    if (b.GetChildCount() > 2 && b.GetChild(2) is Label cross && cross.Visible) bannedHere++;
+                }
+                stat.Text = bannedHere > 0
+                    ? _Loc($"{n} 项 · 已 ban {bannedHere}", $"{n} items · {bannedHere} banned")
+                    : _Loc($"{n} 项", $"{n} items");
+            }
         }
     }
 
@@ -1537,9 +1597,9 @@ public partial class BlacklistPanel : CanvasLayer
         int p = _potions.Count(e => _ActiveBanned(Kind.Potion, e.Id));
         int c = _cards.Count(e => _ActiveBanned(Kind.Card, e.Id));
 
-        _tabCounts[0].Text = $" {r}/{_relics.Count}";
-        _tabCounts[1].Text = $" {p}/{_potions.Count}";
-        _tabCounts[2].Text = $" {c}/{_cards.Count}";
+        _tabButtons[0].Text = $"{_tabNames[0]} {r}/{_relics.Count}";
+        _tabButtons[1].Text = $"{_tabNames[1]} {p}/{_potions.Count}";
+        _tabButtons[2].Text = $"{_tabNames[2]} {c}/{_cards.Count}";
         _footerRelics.Text = _Loc($"遗物 {r}/{_relics.Count}", $"Relics {r}/{_relics.Count}");
         _footerPotions.Text = _Loc($"药水 {p}/{_potions.Count}", $"Potions {p}/{_potions.Count}");
         _footerCards.Text = _Loc($"卡牌 {c}/{_cards.Count}", $"Cards {c}/{_cards.Count}");
@@ -1742,13 +1802,57 @@ public partial class BlacklistPanel : CanvasLayer
         _entryTip = NativeNodeFactory.ShowHoverTip(owner, entry.RawModel, kind == Kind.Relic);
     }
 
+    /// <summary>
+    /// 把游戏的富文本标记转成 Godot BBCode。
+    /// 不做这一步的后果实测：预览框里直接显示 <c>[gold]召唤[/gold][Summon:diff()].</c> 这种原始标记，
+    /// 玩家看到的是内部格式而不是文案。词表来自全量描述统计：gold 占绝大多数，另有少量 blue / purple，
+    /// 以及 <c>[Summon:diff()]</c> 这类带参数的动态标记（无法在本地求值，直接去掉，句子仍然通顺）。
+    /// </summary>
+    private static string _ToGodotBbcode(string text)
+    {
+        if (string.IsNullOrEmpty(text)) return text;
+        // 用不可能出现在文案里的哨兵字符占位，避免"先转颜色、后被转义"的顺序陷阱
+        const string S = "\u0001";
+        var pairs = new (string from, string slot)[]
+        {
+            ("[gold]", S + "G" + S), ("[/gold]", S + "/G" + S),
+            ("[blue]", S + "B" + S), ("[/blue]", S + "/B" + S),
+            ("[purple]", S + "P" + S), ("[/purple]", S + "/P" + S),
+            ("[red]", S + "R" + S), ("[/red]", S + "/R" + S),
+        };
+        foreach (var (from, slot) in pairs) text = text.Replace(from, slot);
+
+        // 其余标记一律剥掉（含带参数的动态标记）
+        text = System.Text.RegularExpressions.Regex.Replace(
+            text, @"\[/?[A-Za-z_][A-Za-z0-9_]*(?::[^\]]*)?\]", string.Empty);
+
+        // 游戏格式化器在缺少运行期上下文时，会把动态数值留成 {Summon:diff()} 这种占位符
+        // （实测是**花括号**，圆括号形式一并兜住）。卡牌数值在 CardModel.DynamicVars 里，
+        // 占位符→变量的映射无法可靠还原，所以换成中性的 ?，至少不把内部格式暴露给玩家。
+        // 注意字符类里**不能排除圆括号**：占位符内部本身带一对 ()，排除掉会导致整条正则失配
+        // （第一版就是这么错的，离线用样例验证过才改对）。
+        text = System.Text.RegularExpressions.Regex.Replace(
+            text, @"[({][A-Za-z_][A-Za-z0-9_]*:[^{}\[\]]*[)}]", "?");
+
+        // 残留的裸方括号在 BBCode 里会被当标签，转义掉
+        text = text.Replace("[", "[lb]");
+
+        return text
+            .Replace(S + "G" + S, "[color=#e8c063]").Replace(S + "/G" + S, "[/color]")
+            .Replace(S + "B" + S, "[color=#7fb3e0]").Replace(S + "/B" + S, "[/color]")
+            .Replace(S + "P" + S, "[color=#b892d8]").Replace(S + "/P" + S, "[/color]")
+            .Replace(S + "R" + S, "[color=#e08a7a]").Replace(S + "/R" + S, "[/color]");
+    }
+
     private void _ShowCardPreview(ModelCatalog.Entry entry, Control owner)
     {
         if (_cardPreview == null || entry == null) return;
         _pvCost.Text = entry.CardCost >= 0 ? entry.CardCost.ToString() : "?";
         _pvName.Text = entry.Title ?? entry.Id;
         _pvMeta.Text = $"{_LocCardType(entry.CardType)} · {_LocRarity(entry.Rarity)} · {entry.Id}";
-        _pvDesc.Text = string.IsNullOrEmpty(entry.Description) ? _Loc("（无描述）", "(no description)") : entry.Description;
+        _pvDesc.Text = string.IsNullOrEmpty(entry.Description)
+            ? _Loc("（无描述）", "(no description)")
+            : _ToGodotBbcode(entry.Description);
         bool banned = _ActiveBanned(Kind.Card, entry.Id);
         _pvBanned.Visible = banned;
         _pvBanned.Text = _IsInherited(Kind.Card, entry.Id)
@@ -1939,6 +2043,205 @@ public partial class BlacklistPanel : CanvasLayer
         else
             MerchantBlacklistLog.Info("[SelfTest] hotkey pass OK: 面板经真实入口成功打开");
         HidePanel();
+    }
+
+    // ── 截图自检（窗口可见模式下跑；用 Godot 视口截图，窗口被遮挡也能截）─────
+    private static BlacklistPanel _shotPanel;
+
+    internal static void RunSelfTestShotPassBegin()
+    {
+        SelfTestSyncBuild = true;           // 截图要确定性：一次建完，别等分帧
+        ShowPanel();                        // **真实入口**：EnsureCreated + CallDeferred(_ShowSelf)
+        MerchantBlacklistLog.Info("[SelfTest] shots: ShowPanel() called (real entry path).");
+    }
+
+    private static BlacklistPanel ShotPanel()
+    {
+        if (_shotPanel != null && GodotObject.IsInstanceValid(_shotPanel)) return _shotPanel;
+        _shotPanel = GodotObject.IsInstanceValid(_instance) ? _instance : null;
+        return _shotPanel;
+    }
+
+    /// <summary>按序号摆姿势；返回 false 表示姿势已用尽。</summary>
+    internal static bool ApplySelfTestShotPose(int index)
+    {
+        var p = ShotPanel();
+        if (p == null) { MerchantBlacklistLog.Warn("[SelfTest] shots: panel instance missing"); return false; }
+        if (p._window == null || !GodotObject.IsInstanceValid(p._window))
+        {
+            MerchantBlacklistLog.Warn("[SelfTest] shots: window not built yet");
+            return true;    // 继续等下一轮，不算用尽
+        }
+        switch (index)
+        {
+            case 0:     // 干净参照：先把面板藏起来截一张主菜单，用于逐像素比对"面板是否真的不透明"
+                p._HideSelf();
+                return true;
+            case 1:     // 默认：遗物网格 + 全局层
+                p._ShowSelf();
+                p._SetPoseTab(Tab.Relics);
+                return true;
+            case 2:     // 卡牌页签（文字列表）
+                p._SetPoseTab(Tab.Cards);
+                return true;
+            case 3:     // 卡牌 + 悬停预览
+                p._ShowPreviewAt(new Vector2(p._window.Size.X * 0.44f, 200f));
+                return true;
+            case 4:     // 卡牌 + 搜索（过滤 + 命中高亮）
+                p._HideCardPreview();
+                p._cardQuery = "打击";
+                if (p._cardSearch != null) p._cardSearch.Text = "打击";
+                p._RebuildCardRows();
+                return true;
+            case 5:     // 遗物 + 若干已 ban
+                p._cardQuery = "";
+                if (p._cardSearch != null) p._cardSearch.Text = "";
+                p._RebuildCardRows();
+                p._SetPoseTab(Tab.Relics);
+                p._PoseBanSome(Kind.Relic, 3);
+                return true;
+            case 6:     // 角色层：全局 ban 显示为"继承"
+                BlacklistStore.ActiveCategory = "IRONCLAD";
+                p._UpdateCategoryButtons();
+                p._PaintAll();
+                return true;
+            case 7:     // 清空确认弹窗
+                p._OnClearPressed();
+                return true;
+            case 8:     // 缩到最小尺寸：看布局自适应
+                if (p._confirmOverlay != null) p._confirmOverlay.Visible = false;
+                p._confirmAction = null;
+                p._window.Size = new Vector2(MinWidth, MinHeight);
+                p._ClampWindow();
+                p._LayoutGridColumns();
+                p._HideCardPreview();
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    internal static void EndSelfTestShotPass()
+    {
+        var p = ShotPanel();
+        if (p != null)
+        {
+            // 还原成"什么都没 ban"（截图期间为了效果临时 ban 过）
+            var saved = BlacklistStore.ActiveCategory;
+            BlacklistStore.ActiveCategory = "GLOBAL";
+            BlacklistStore.ClearRelics(); BlacklistStore.ClearCards(); BlacklistStore.ClearPotions();
+            BlacklistStore.ActiveCategory = "IRONCLAD";
+            BlacklistStore.ClearRelics();
+            BlacklistStore.ActiveCategory = saved;
+            p._PaintAll();
+            p._HideSelf();
+            p.QueueFree();
+        }
+        _shotPanel = null;
+        SelfTestSyncBuild = false;
+        MerchantBlacklistLog.Info("[SelfTest] shots: done.");
+    }
+
+    private void _SetPoseTab(Tab tab)
+    {
+        _HideCardPreview();
+        _SwitchTab(tab);
+    }
+
+    private void _PoseBanSome(Kind kind, int count)
+    {
+        var items = kind == Kind.Relic ? _relics : kind == Kind.Potion ? _potions : _cards;
+        for (int i = 0; i < count && i < items.Count; i++)
+        {
+            if (!_ActiveBanned(kind, items[i].Id)) _ToggleBan(kind, items[i].Id);
+        }
+    }
+
+    /** 把卡牌预览摆到指定位置（截图用；真实交互仍跟随鼠标） */
+    private void _ShowPreviewAt(Vector2 position)
+    {
+        var entry = _cards.FirstOrDefault(c => !c.IsColorless) ?? _cards.FirstOrDefault();
+        if (entry == null) return;
+        _ShowCardPreview(entry, _window);
+        _cardPreview.Position = position;
+        _cardPreview.Visible = true;
+    }
+
+    internal static void CaptureSelfTest(string path)
+    {
+        try
+        {
+            var p = ShotPanel();
+            if (p == null) { MerchantBlacklistLog.Warn("[SelfTest] shots: no panel"); return; }
+            var image = p.GetViewport()?.GetTexture()?.GetImage();
+            if (image == null) { MerchantBlacklistLog.Warn("[SelfTest] shots: no viewport image"); return; }
+            var dir = Path.GetDirectoryName(path);
+            if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+            var err = image.SavePng(path);
+            if (err == Error.Ok)
+                MerchantBlacklistLog.Info($"[SelfTest] shot saved {image.GetWidth()}x{image.GetHeight()} -> {path}");
+            else
+                MerchantBlacklistLog.Warn($"[SelfTest] shot save failed ({err}) -> {path}");
+        }
+        catch (Exception ex)
+        {
+            MerchantBlacklistLog.Warn($"[SelfTest] capture failed: {ex.Message}");
+        }
+    }
+
+    /** 几何自检：不需要渲染就能发现"页脚被挤出窗口"这类问题 */
+    internal static void ReportLayout(string stage)
+    {
+        var p = ShotPanel();
+        if (p == null || p._window == null) { MerchantBlacklistLog.Warn($"[SelfTest] layout/{stage}: no panel"); return; }
+        var w = p._window;
+        var rect = w.GetGlobalRect();
+        float winH = w.Size.Y, winW = w.Size.X;
+        var footer = p._hintLabel?.GetParent()?.GetParent() as Control;
+        float footerBottom = footer != null ? footer.Position.Y + footer.Size.Y : -1f;
+        var pane = p._currentTab == Tab.Cards ? p._cardPane : p._currentTab == Tab.Potions ? p._potionPane : p._relicPane;
+        var grid = p._relicGroups.GetChildren().OfType<GridContainer>().FirstOrDefault();
+        var scroll = p._currentTab == Tab.Cards ? p._cardScroll : p._currentTab == Tab.Potions ? p._potionScroll : p._relicScroll;
+        MerchantBlacklistLog.Info(
+            $"[SelfTest] layout/{stage}: window={winW:F0}x{winH:F0} " +
+            $"inTree={w.IsInsideTree()} visibleInTree={w.IsVisibleInTree()} " +
+            $"rect=({rect.Position.X:F0},{rect.Position.Y:F0} {rect.Size.X:F0}x{rect.Size.Y:F0}) " +
+            $"layer={p.Layer} panelInTree={p.IsInsideTree()} " +
+            $"footerBottom={footerBottom:F0} inside={footerBottom <= winH + 0.5f} " +
+            $"pane={(pane != null ? $"{pane.Size.X:F0}x{pane.Size.Y:F0}" : "null")} " +
+            $"scroll={(scroll != null ? $"{scroll.Size.X:F0}x{scroll.Size.Y:F0}" : "null")} " +
+            $"gridCell={(grid != null && grid.GetChildCount() > 0 && grid.GetChild(0) is Control c0 ? $"{c0.Size.X:F0}x{c0.Size.Y:F0}" : "null")} " +
+            $"relicGridCols={grid?.Columns} cardRowsInWindow={_shotPanel._rowPool.Count} " +
+            $"preview={(p._cardPreview != null ? $"{p._cardPreview.Size.X:F0}x{p._cardPreview.Size.Y:F0}" : "null")} " +
+            $"confirm={(p._confirmOverlay != null ? p._confirmOverlay.Visible.ToString() : "null")}");
+    }
+
+    private void _OnWindowResized()
+    {
+        // 注意不要在这里再调 _ClampWindow()：它会改 Size，而 Size 变化又会触发本回调 → 死循环
+        _LayoutGridColumns();
+        _UpdateCardWindow();
+    }
+
+    /// <summary>
+    /// 网格列数按可用宽度动态算。写死 8 列的问题：窗口缩到最小尺寸（620 宽）时
+    /// 8×(72+14+6) 远超可用宽度，格子会被挤扁/裁切。
+    /// </summary>
+    private void _LayoutGridColumns()
+    {
+        if (_window == null || _relicGroups == null) return;
+        // 用窗口宽度算，不要用 scroll.Size —— 尺寸刚变时 scroll 还是旧值（实测：缩到 620 后
+        // 仍按旧的 1000 宽算出 10 列，内容 922 宽溢出面板）
+        float paneW = Mathf.Max(120f, _window.Size.X - 28f);
+        float cellW = IconSize + CellPadding + 6f;
+        int cols = Mathf.Max(3, (int)((paneW - 8f) / cellW));
+
+        foreach (var host in new[] { _relicGroups, _potionGroups })
+        {
+            if (host == null) continue;
+            foreach (var child in host.GetChildren())
+                if (child is GridContainer grid) grid.Columns = cols;
+        }
     }
 
     private void _SelfTestReport(string stage)

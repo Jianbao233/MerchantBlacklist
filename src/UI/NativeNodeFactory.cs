@@ -132,7 +132,7 @@ internal static class NativeNodeFactory
             var tipObj = _hoverTipCreateAndShow.Invoke(null, new[] { owner, hoverTips, alignment });
 
             // 原生 CreateAndShow 把 tip 挂在 NGame.HoverTipsContainer（root 普通节点），
-            // 我们的 BlacklistPanel 是 CanvasLayer.Layer=100，渲染顺序永远高于 root，
+            // 我们的 BlacklistPanel 是 CanvasLayer.Layer=1000，渲染顺序永远高于 root，
             // 因此 tip 必然被面板遮挡。reparent 到 owner 所在 CanvasLayer 即可同层渲染，
             // ZIndex 跨 CanvasLayer 无效，必须用 reparent。
             // 商店内 owner 不在自定义 CanvasLayer 里，找不到时不动，保持原生行为。

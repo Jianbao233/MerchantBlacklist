@@ -237,7 +237,45 @@ dotnet build -c Debug -p:Sts2SdkDir="D:\A-Developing\tools\sts2_sdk_by_version\v
 
 ---
 
-## 8. 无头自检怎么跑（真机验证不再需要人按 F10）
+## 8. 视觉迭代：截图驱动的自我审查（2026-10-04）
+
+用户授权「用前端可见的形式开发，但别抢占到最前端，自己后台截图改」。做法：
+
+```powershell
+# 等游戏退出 → 部署 → 可见窗口启动（压到 z 序底部且不激活、Dummy 音频）→ 逐姿势截图 → 自动退出
+main\sts2\tools\MerchantBlacklistVerify\wait-and-shoot.ps1
+main\sts2\tools\MerchantBlacklistVerify\run-visual-shots.ps1
+```
+
+- 截图用 **Godot 视口截图**（`GetViewport().GetTexture().GetImage().SavePng()`），窗口被遮挡也能截，不依赖桌面截图工具
+- 姿势（`MERCHANTBLACKLIST_SELFTEST=shots`）：0=面板隐藏的干净参照 → 遗物 / 卡牌 / 卡牌+预览 / 搜索 / 已 ban / 角色层继承 / 清空确认 / 最小尺寸
+- **先等主菜单就绪再截**（开场 logo 期间只能拍到 MegaCrit 标志，实测踩过）
+- 每帧同时输出 `layout/poseN:` 几何自检（窗口尺寸、是否在树、页脚是否在窗内、面板/滚动区尺寸、格子尺寸、列数、虚拟行数）
+
+**只有看图才能发现的问题**（几何自检全绿但画面是坏的）：
+
+| 问题 | 根因 |
+|---|---|
+| 面板一打开就是最小尺寸 620×460 | `_Ready` 时视口还没尺寸，按视口夹紧把窗口压到下限。改为**首次显示时**再定尺寸/居中 |
+| 卡牌列表整片空白、首行文字糊成一团 | 虚拟滚动的行是 `_cardSizer` 的普通子节点，**必须自己设 `Position`**，我漏了 → 所有行堆在 (0,0) |
+| 筛选块只看得见色点、文字不渲染 | 往 `Button` 里塞 `HBox+Label` —— Button 不是容器，子控件尺寸为 0。改用 `Button.Text` + 字色 |
+| 窄窗口下内容比窗口还宽（620 窗口里 pane=649） | 工具条 `HBoxContainer` 的最小宽度是子项之和。改 `HFlowContainer` 让筛选块自动换行 |
+| 预览框显示 `{Summon:diff()}` 内部标记 | 游戏格式化器缺运行期上下文时的占位符。游戏标记 → Godot BBCode 颜色 + 占位符换 `?` |
+| 暂停菜单每次打开都喷一条 ERROR + C# 回溯 | `BindReleased` 里多余的"先 Disconnect 再 Connect"（连接本来就没被复制） |
+
+**两个我差点被自己骗过去的坑**：
+
+1. **用"像素变了没有"判断面板透不透明是错的** —— 半透明同样会让每个像素都变。正确做法是看**同一条内容均匀的横带上，背后的东西变了面板值变不变**（实测 4 个采样点背后亮度 57→255，面板值恒为 39，差 0 → 确实不透明）。我一度按"看图"认定有鬼影，还"量出"9% 透射率，其实是拿两个**内容不同**的点在比较。
+2. **看缩略图会看错** —— 我"看见"主菜单文字穿透面板，像素数据证明没有。结论以像素/几何为准，眼睛只用来判断"好不好看"。
+
+**顺带确认的两件事**：
+
+- 面板底色仍从 0.97 改成 **1.0**（设置面板不该透出游戏画面）
+- `CanvasLayer.Layer` 从 100 抬到 **1000**：确保压在最上层。原生悬停 tooltip 不受影响 —— `NativeNodeFactory.ReparentTipToOwnerLayer` 会把 tip 重挂到 owner 所在的 CanvasLayer 同层渲染
+
+---
+
+## 9. 无头自检怎么跑（真机验证不再需要人按 F10）
 
 面板的 `ModelCatalog` 只在"打开过一次面板"时才建立，所以真机验证原本必须有人进游戏操作。
 现在有了内建自检（`src/SelfTest.cs`），一条命令即可：
