@@ -115,7 +115,22 @@ dotnet build -c Debug -p:Sts2SdkDir="D:\A-Developing\tools\sts2_sdk_by_version\v
 
 待办：
 
-5. 卡牌 ban 目前只拦**商店卡槽**；`docs/TODO_internal.md` 规划的「战斗外卡牌奖励生成」入口尚未做。
+5. **卡牌奖励入口：经查证「不应实现」**（2026-10-03 结论，附证据）。原先 `docs/TODO_internal.md` 计划把 ban 范围扩到「战斗外卡牌奖励生成」，但那条路走不通：
+
+   - `CardReward.OnSelect()`（0.107.1 `Core/Rewards/CardReward.cs:183-236`）的奖励选择走
+     `PlayerChoiceSynchronizer` 的**索引**同步：本端 `SyncLocalChoice(player, choiceId, PlayerChoiceResult.FromIndex(num))`；
+     其它端 `num = (await WaitForRemoteChoice(...)).AsIndexOrNull()` 后 `obtainedCard = _cards[num.Value].Card`
+     —— **索引是在各端自己的本地 `_cards` 列表里解析的**。本地过滤会让各端列表错位，结果是错牌，或日志报
+     `Received bad player choice index N for a card reward with M cards`。备选方案用 `_cards.Count + alternativeIndex`
+     编码，同样依赖列表长度一致。
+   - 结论：卡牌奖励**不能**做本地过滤（除非放弃联机，与 mod 定位冲突）。这也与 `docs/DESIGN.md` 既有的
+     「不动战斗后奖励 / 精英 / Boss / 宝箱 / 事件」边界一致 —— **建议维持现状**。
+
+   **对照：商店路径的联机安全已复核（补上 v0.3.0 卡牌 ban 缺失的验证）** ——
+   `MerchantCardEntry.OnTryPurchase` 走 `RewardSynchronizer.SyncLocalObtainedCard(CreationResult.Card)`，
+   而 `RewardObtainedMessage` 只携带完整 `cardModel` / `potionModel` / `relicModel` / `goldAmount`、
+   **没有任何索引字段**（0.107.1 与 0.111.0 逐字段一致），且全库不存在 `MerchantPurchase` 类消息。
+   所以商店里的卡牌 ban 与遗物/药水一样：**客户端本地过滤联机安全**。
 
 **B. 元数据与文档对齐**
 1. `mod_manifest.json` 与 `README.md` 仍写「适配 STS2 0.107」；需按实测更新，并补 `min_game_version`（**必须填最低支持版本**，填高会导致低版本分支整包被游戏拒载）。
