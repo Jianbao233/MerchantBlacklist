@@ -225,6 +225,15 @@ internal static class ModelCatalog
         var poolBaseType = FindType("MegaCrit.Sts2.Core.Models.CardPoolModel");
         var poolTitleProp = poolBaseType?.GetProperty("Title");
         var poolIsColorlessProp = poolBaseType?.GetProperty("IsColorless");
+        if (poolBaseType == null || poolTitleProp == null || poolIsColorlessProp == null)
+        {
+            // 宁可留一条可诊断的日志：拿不到这两个成员时，无色分组会整体退化成「角色卡」，
+            // 失败是静默的，没有这条日志将无法判断是游戏改了成员名还是真的没有无色卡。
+            MerchantBlacklistLog.Warn(
+                $"CardPoolModel.Title / IsColorless not resolved (type={poolBaseType != null}, " +
+                $"title={poolTitleProp != null}, isColorless={poolIsColorlessProp != null}); " +
+                "colorless cards will be listed as character cards.");
+        }
 
         foreach (var model in models)
         {
