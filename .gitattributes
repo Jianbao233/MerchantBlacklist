@@ -1,0 +1,17 @@
+# 统一行尾：所有文本文件在仓库与工作区都使用 LF。
+# 背景：本仓历史 blob 为 LF，但工作区曾被工具整体改写成 CRLF，
+# 导致 git status 出现大量「已修改」噪声，掩盖真实改动。
+# 不要依赖 core.autocrlf（跨机器不一致），一律以本文件为准。
+* text=auto eol=lf
+
+# 明确的二进制资源（避免 text=auto 误判）
+*.jpg binary
+*.jpeg binary
+*.png binary
+*.gif binary
+*.webp binary
+*.zip binary
+*.dll binary
+*.pdb binary
+*.pck binary
+*.ico binary
