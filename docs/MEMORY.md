@@ -174,7 +174,41 @@ dotnet build -c Debug -p:Sts2SdkDir="D:\A-Developing\tools\sts2_sdk_by_version\v
 4. ✅ 停止跟踪 `mod-uploader.log`（工坊上传器写的临时日志，不属于源码）：加进 `.gitignore` 并 `git rm --cached`。
 5. ⏳ 0.3.0 从未打包；下次发布要重建 `torelease/` 并归档 `release/MerchantBlacklist_v0.3.0.zip`。**发布前记得**：`mod_manifest.json` 的 description 与 `_workshop_workspaces/ShopBlacklist/workshop.json` 的文案要同步（description 里「适配 STS2 0.107」可与 `min_game_version: 0.107.1` 对齐成「0.107.1+」）。
 
-**C. 面板 UI 重构（前置调研已完成，等方向确认）**
+**C. 面板 UI 重构 —— 已完成（2026-10-04，提交 `1338aed`）**
+
+用户授权「按你的原型设计开发，自己无头测试，最后交付验收」。`BlacklistPanel.cs` 已按浏览器原型重写
+（80,905 字节），**保留了用户确认的三个形态**：可拖拽 + 八向缩放浮动窗、卡牌用文字列表、悬停卡牌预览。
+渲染架构换成原型那套：
+
+| 旧实现 | 新实现 |
+|---|---|
+| 切页签 / 每敲一个搜索字符 / 每点一次 ban 都清空 `_content` 重建整表 | 节点**只建一次**，之后只改 `Visible` / stylebox / modulate |
+| 首次打开一次性建完几百个节点 | **分帧构建**（Timer，每帧 40 个节点） |
+| 卡牌列表全量建行 | **虚拟滚动**（实测 519 行只实例化 7 个行节点） |
+| 搜索按键即重绘 | **防抖 120ms**（`Timer` 节点） |
+| —— | `id → 节点 / id → 数据` 两张字典；本层/全局继承两种 ban 视觉区分 + 图例；批量与清空**可撤销**；清空二次确认；搜索命中在卡牌行高亮 |
+
+**无头 + 禁音实测证据**（`--headless --audio-driver Dummy --quit-after 0`，退出码 0，15.8 秒）：
+
+```
+[SelfTest] ModelCatalog ready. relics=145, potions=60, cards=519.
+[SelfTest] cards split. character=454, colorless=65.
+[SelfTest] panel/populated: relics=145(cells=145,visible=145) potions=60(cells=60,visible=60)
+           cards=519 cardRows=519(pooled=7) colorless=65 nativeIcons=205 fallbackIcons=0
+[SelfTest] panel/search: relics=145(cells=145,visible=2) potions=60(cells=60,visible=0)
+[SelfTest] async pass OK: 分帧构建已插入全部 205 个格子
+```
+
+- 145/60/519/**65** 与 `PoolExtractor` 从 IL 独立算出的期望值**逐个吻合**（该期望值已用旧构建真实日志 145/60 对撞验证）→ 阶段二那个「无色卡分组恒为空」的修复在真机上确认生效
+- `nativeIcons=205 fallbackIcons=0`：205 个遗物/药水格子全部拿到**原生** `NRelic`/`NPotion` 节点（图标与 tooltip 会真的渲染，没有退化成占位）
+- `pooled=7`：虚拟滚动生效
+- 同步与**分帧**两条构建路径都跑通（分帧是用户实际走的那条）
+- 无自检标记时启动**完全惰性**：普通启动日志里没有任何 `[SelfTest]` 行
+
+> **未验证项（需人眼）**：headless 无渲染，所以**视觉外观没有被确认过** —— 配色、间距、悬停预览位置、缩放后的布局自适应都要在真实窗口里看。
+
+<details>
+<summary>阶段三的前置调研（历史记录，已完成其使命）</summary>
 
 现状诊断（实测）：`BlacklistPanel.cs` 1276 行，含 **61 处硬编码 `new Color(...)`**、5 个自绘 `StyleBoxFlat`、22 处字号覆写、28 处颜色覆写，并且是一整套**自制拖拽 / 八向缩放浮动窗**（`_DetectEdges`/`_ApplyResize`/`ResizeEdge`…）——**游戏原生 UI 里没有这种窗口**；三个页签里遗物/药水是图标网格、卡牌是**文字列表**。原始设计（`docs/DESIGN.md` §6.1）锁定的是「不写自有 Theme、不画自有底板、全部 clone 原生节点」，实现已偏离 —— 这就是「不像游戏」的根因，不是功能缺失。
 
@@ -198,3 +232,33 @@ dotnet build -c Debug -p:Sts2SdkDir="D:\A-Developing\tools\sts2_sdk_by_version\v
 - 场景**自包含**：`NRelicCollection._Ready()` 用唯一名取 `%ScreenContents` 与 7 个稀有度分类节点，无需外部宿主；`NSubmenu.SetStack()` 可选，`HideBackButtonImmediately()` 可隐藏返回键。
 - 内容填充走**公开虚方法** `OnSubmenuOpened()`（可直接调用触发加载，无需反射）；格子可点（`NRelicCollectionEntry : NButton` + public `relic`；`NCardGrid` 的 `HolderPressed`/`HolderAltPressed`）。
 - **唯一硬摩擦**：`NRelicCollection.LoadRelics()` 是 private 且按玩家收集进度决定可见性（读 `SaveManager.Instance.Progress.DiscoveredRelics`），图鉴会把没见过的遗物显示成 locked —— 黑名单编辑器需要"全部可见"，得反射传「全见过 + 全解锁」状态或自建分类节点。
+
+</details>
+
+---
+
+## 8. 无头自检怎么跑（真机验证不再需要人按 F10）
+
+面板的 `ModelCatalog` 只在"打开过一次面板"时才建立，所以真机验证原本必须有人进游戏操作。
+现在有了内建自检（`src/SelfTest.cs`），一条命令即可：
+
+```powershell
+# 触发方式二选一（**优先用文件**：实测从外部启动游戏时环境变量不一定能可靠传到游戏进程）
+Set-Content "$env:TEMP\MerchantBlacklist.selftest" -Value "full" -NoNewline -Encoding ASCII
+# 或：$env:MERCHANTBLACKLIST_SELFTEST = "full"
+
+& "F:\Steam\steamapps\common\Slay the Spire 2\SlayTheSpire2.exe" `
+    --headless --quit-after 0 --audio-driver Dummy `
+    --log-file "D:\A-Developing\tmp\mb-selftest\run.log"
+```
+
+- `catalog`（或文件内容留空）：只建立目录并打印期望值，游戏继续运行
+- `full`：额外同步构建面板 + 走一遍三个页签 + 搜索 + ban 切换，再用**分帧路径**建第二个面板，
+  最后自己退出游戏（退出码 0，约 16 秒）
+- **跑完记得删掉标记文件**，否则每次启动都会自检
+
+三条踩过的坑（都写进代码注释了）：
+
+1. **驱动必须用 `SceneTreeTimer` 链**，不能挂节点 `_Process` 或 `SceneTree.ProcessFrame` —— 后两者在游戏启动过程中会被暂停，自检静默卡死（LoadOrderManager 会话实测，其 README 有记录）
+2. **环境变量不可靠**：第一次无头测试时 `$env:...="full"` 设了、游戏进程里却是空的（日志里连一行自检都没有），所以改成以 `%TEMP%` 标记文件为主
+3. **收尾别用 `finally`**：full 模式还要等分帧构建跑完，无条件 `Finish()` 会把游戏过早退掉（第一次跑分帧路径就踩了，报告没打出来就退出了）
