@@ -5,8 +5,8 @@ param(
 $ErrorActionPreference = "Stop"
 $ProjectRoot = $PSScriptRoot
 $ModId = "MerchantBlacklist"
-$GameModsDir = "K:\SteamLibrary\steamapps\common\Slay the Spire 2\mods\$ModId"
-$GameModsDirAlt = "C:\Users\Administrator\AppData\Roaming\SlayTheSpire2\mods\$ModId"
+$GameModsDir = "F:\Steam\steamapps\common\Slay the Spire 2\mods\$ModId"
+$GameModsDirAlt = "C:\Users\Jianbao\AppData\Roaming\SlayTheSpire2\mods\$ModId"
 
 Write-Host "=== MerchantBlacklist Mod Build ===" -ForegroundColor Cyan
 Write-Host "Project: $ProjectRoot"
@@ -22,7 +22,7 @@ if (Test-Path $GameModsDir) {
 elseif (Test-Path $GameModsDirAlt) {
     $TargetDir = $GameModsDirAlt
 }
-elseif (Test-Path "K:\SteamLibrary\steamapps\common\Slay the Spire 2\mods") {
+elseif (Test-Path "F:\Steam\steamapps\common\Slay the Spire 2\mods") {
     $TargetDir = $GameModsDir
     New-Item -ItemType Directory -Force -Path $TargetDir | Out-Null
 }
