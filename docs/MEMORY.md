@@ -154,3 +154,10 @@ dotnet build -c Debug -p:Sts2SdkDir="D:\A-Developing\tools\sts2_sdk_by_version\v
 | 场景路径构造 | `SceneHelper.GetScenePath(inner)` | → `res://scenes/<inner>.tscn`；也可直接 `ResourceLoader.Load<PackedScene>` |
 
 三个候选方向（按根 `AGENTS.md` 约定**须先与用户确认**再动手）：**A** 直接实例化原生图鉴做「ban 叠加层」（视觉 100% 原生，但要把只读屏改造成编辑器，依赖内景结构、跨版本最脆）；**B** 保留现有布局只换视觉层（用主题读取替代硬编码配色，卡牌页签改图标网格，风险最低）；**C** 去掉浮动窗、改原生模态形态。
+
+方案 A 的可行性已核实（结论是可行，比预想乐观）：
+
+- 三个图鉴屏都在**预载集**里 —— `Core/Assets/AssetSets.cs:175-177` 把 `NRelicCollection.AssetPaths` / `NPotionLab.AssetPaths` / `NCardLibrary.AssetPaths` 收进 `MainMenuSet`；且 `AssetCache.GetAsset` 未命中时会**回退到 `ResourceLoader.Load`** → `Create()` 不依赖"玩家是否进过图鉴"。
+- 场景**自包含**：`NRelicCollection._Ready()` 用唯一名取 `%ScreenContents` 与 7 个稀有度分类节点，无需外部宿主；`NSubmenu.SetStack()` 可选，`HideBackButtonImmediately()` 可隐藏返回键。
+- 内容填充走**公开虚方法** `OnSubmenuOpened()`（可直接调用触发加载，无需反射）；格子可点（`NRelicCollectionEntry : NButton` + public `relic`；`NCardGrid` 的 `HolderPressed`/`HolderAltPressed`）。
+- **唯一硬摩擦**：`NRelicCollection.LoadRelics()` 是 private 且按玩家收集进度决定可见性（读 `SaveManager.Instance.Progress.DiscoveredRelics`），图鉴会把没见过的遗物显示成 locked —— 黑名单编辑器需要"全部可见"，得反射传「全见过 + 全解锁」状态或自建分类节点。
