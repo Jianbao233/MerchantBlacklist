@@ -137,5 +137,20 @@ dotnet build -c Debug -p:Sts2SdkDir="D:\A-Developing\tools\sts2_sdk_by_version\v
 2. `docs/DESIGN.md` 与实现脱节：仍写「不做卡牌黑名单」、`affects_gameplay: true`。**实现是对的**——`affects_gameplay` 必须保持 `false`（v0.111.0 用它决定是否参与联机内容哈希与 `ContentSorter` 排序；本 mod 不注册 model、不发网络消息）。
 3. 0.3.0 从未打包；下次发布要重建 `torelease/` 并归档 `release/MerchantBlacklist_v0.3.0.zip`。
 
-**C. 面板 UI 重构（进行中）**
-用户对当前 `BlacklistPanel` 不满意，计划整体重构。注意根 `AGENTS.md` 约定：UI 任务先确认是否继续优先复用游戏原生组件（`tools/SL2_v0.111.0/scenes/`）。
+**C. 面板 UI 重构（前置调研已完成，等方向确认）**
+
+现状诊断（实测）：`BlacklistPanel.cs` 1276 行，含 **61 处硬编码 `new Color(...)`**、5 个自绘 `StyleBoxFlat`、22 处字号覆写、28 处颜色覆写，并且是一整套**自制拖拽 / 八向缩放浮动窗**（`_DetectEdges`/`_ApplyResize`/`ResizeEdge`…）——**游戏原生 UI 里没有这种窗口**；三个页签里遗物/药水是图标网格、卡牌是**文字列表**。原始设计（`docs/DESIGN.md` §6.1）锁定的是「不写自有 Theme、不画自有底板、全部 clone 原生节点」，实现已偏离 —— 这就是「不像游戏」的根因，不是功能缺失。
+
+游戏原生可复用零件（**已核实 0.107.1 与 0.111.0 两分支都存在**）：
+
+| 用途 | 原生类型 | 入口 / 关键点 |
+|---|---|---|
+| 遗物收藏册整屏 | `NRelicCollection : NSubmenu` | `Create()`；`res://scenes/screens/relic_collection/relic_collection.tscn` |
+| 遗物格子 | `NRelicCollectionEntry : NButton` | `Create(relic, visibility)`；**public 字段 `relic`** → 可直接 hook `Pressed` |
+| 药水实验室 | `NPotionLab` / `NLabPotionHolder : Control` | `.../potion_lab/potion_lab.tscn`；holder 的模型是 private，需反射 |
+| 卡牌库整屏 | `NCardLibrary : NSubmenu` | `Create()`；`.../card_library/card_library.tscn` |
+| 卡牌网格 | `NCardGrid` / `NCardLibraryGrid` | **原生 `HolderPressed` / `HolderAltPressed` 委托**（天然区分左右键） |
+| 子菜单基类 | `NSubmenu : Control, IScreenContext` | `SetStack()` 可选（不进原生栈就自己 `AddChild`）；`HideBackButtonImmediately()` |
+| 场景路径构造 | `SceneHelper.GetScenePath(inner)` | → `res://scenes/<inner>.tscn`；也可直接 `ResourceLoader.Load<PackedScene>` |
+
+三个候选方向（按根 `AGENTS.md` 约定**须先与用户确认**再动手）：**A** 直接实例化原生图鉴做「ban 叠加层」（视觉 100% 原生，但要把只读屏改造成编辑器，依赖内景结构、跨版本最脆）；**B** 保留现有布局只换视觉层（用主题读取替代硬编码配色，卡牌页签改图标网格，风险最低）；**C** 去掉浮动窗、改原生模态形态。
