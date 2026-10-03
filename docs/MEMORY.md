@@ -19,7 +19,7 @@
 | 项 | 值 |
 |---|---|
 | 源码版本 | **0.3.0**（含卡牌 ban；`mod_manifest.json` / csproj 一致） |
-| git | `main` 本地已含 2026-10-03 的 3 个 commit（**尚未 push**） |
+| git | `main` 本地领先 `origin/main` **9 个 commit**（2026-10-03 阶段一 + 阶段二，**尚未 push**） |
 | 工坊已上传版本 | **0.2.0**（2026-06-21），条目 visibility `private` |
 | `release/` 归档 | 最新 `MerchantBlacklist_v0.2.0.zip`；**0.3.0 从未打包** |
 | `torelease/` | 仍是 0.2.0 时期产物，需在下次发布前重建 |
@@ -133,7 +133,7 @@ dotnet build -c Debug -p:Sts2SdkDir="D:\A-Developing\tools\sts2_sdk_by_version\v
    所以商店里的卡牌 ban 与遗物/药水一样：**客户端本地过滤联机安全**。
 
 **B. 元数据与文档对齐**
-1. `mod_manifest.json` 与 `README.md` 仍写「适配 STS2 0.107」；需按实测更新，并补 `min_game_version`（**必须填最低支持版本**，填高会导致低版本分支整包被游戏拒载）。
+1. ✅ 已补 `min_game_version: "0.107.1"`（最低支持版本，与 LoadOrderManager / RitsuLib 同约定），消除每次启动的 `does not declare min game version` WARN。依据：双分支编译期 API 门禁在 v0.107.1 与 v0.111.0 均通过。描述里的「适配 STS2 0.107」当前是准确的（正式版即 0.107.1），等 v0.111.0 也跑过再考虑改成「0.107.1+ / 0.111.x」口径。
 2. `docs/DESIGN.md` 与实现脱节：仍写「不做卡牌黑名单」、`affects_gameplay: true`。**实现是对的**——`affects_gameplay` 必须保持 `false`（v0.111.0 用它决定是否参与联机内容哈希与 `ContentSorter` 排序；本 mod 不注册 model、不发网络消息）。
 3. 0.3.0 从未打包；下次发布要重建 `torelease/` 并归档 `release/MerchantBlacklist_v0.3.0.zip`。
 
