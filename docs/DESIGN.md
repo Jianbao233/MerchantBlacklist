@@ -8,21 +8,36 @@ UI 形态已锁定为**候选 C：独立设置面板**。本稿在第 5、6 节�
 
 ---
 
+## 0. 与本稿写作时的差异（后续更新，读下文时请先看这里）
+
+本稿写于 v0.1 阶段。之后实现演进，以下三处与下文原文不一致，**以这里为准**：
+
+1. **卡牌 ban 已实现**（v0.3.0）：商店卡槽的卡牌会被过滤、面板新增「卡牌」页签、商店内可右键拉黑卡牌。第 1 节非目标里「不做卡牌黑名单」一条已作废。
+2. **`affects_gameplay` 最终为 `false`**（不是下文写的 `true`）。理由见第 2 节末尾的更正说明。
+3. **黑名单从「全局一层」扩为「全局 + 各角色两层」**（v0.2.0），面板顶部有全局 / 角色切换。
+4. 面板**视觉实现**正在重做（当前实现偏离了第 6.1 节「不写自有 Theme、不画自有底板」的原则）。
+
+---
+
 ## 1. 目标与非目标
 
 ### 目标
 
-- 在商店生成的瞬间，把玩家拉黑的遗物 / 药水从**他自己**的商店库存里替换或剔除。
+- 在商店生成的瞬间，把玩家拉黑的遗物 / 药水 / 卡牌从**他自己**的商店库存里替换或剔除。
 - 仅作用于玩家本机的本地商店库存生成路径，不发任何网络消息。
 - 联机零侵入：单装可用，主机/客机身份无关，对端是否安装无关。
-- 黑名单可持久化、跨局生效、跨角色全局共享。
+- 黑名单可持久化、跨局生效、跨角色全局共享（v0.2.0 起另有各角色独立层）。
 
 ### 非目标（明确不做）
 
 - 不动战斗后奖励、精英奖励、Boss 奖励、宝箱遗物。
 - 不动事件奖励、Neow / Pael / Vakuu / TinkerTime 等任何事件 EventOption。
 - 不动战斗后掉落药水。
-- 不做卡牌黑名单（已有第三方 mod 覆盖该需求）。
+- ~~不做卡牌黑名单~~ → **已作废**：v0.3.0 实现了卡牌 ban（仅商店卡槽）。
+- **不做卡牌奖励过滤**（明确结论，非"暂缓"）：卡牌奖励的选择走**索引型同步**
+  （`CardReward.OnSelect` → `PlayerChoiceSynchronizer.SyncLocalChoice(..., PlayerChoiceResult.FromIndex(num))`，
+  其它端用 `_cards[num]` 在**各自本地列表**里解析），本地过滤会让各端列表错位、导致错牌或
+  `Received bad player choice index` 报错。除非放弃联机，否则不能做。
 - 不做开局起手遗物覆盖。
 - 不做白名单模式。
 
@@ -33,27 +48,37 @@ UI 形态已锁定为**候选 C：独立设置面板**。本稿在第 5、6 节�
 ## 2. 联机安全边界
 
 ```
-商店遗物 / 商店药水
+商店遗物 / 商店药水 / 商店卡牌
    生成路径：MerchantInventory.CreateForNormalMerchant(player)
    作用域：  per-player 本地构造，不广播
    结论：    本地过滤即可，单装稳定，对端零感知
 
-其它来源（精英 / Boss / 宝箱 / 事件 / Neow / 战斗药水）
-   生成路径：主机权威 + RewardSynchronizer 广播
+购买/获得的同步（已核实，两个游戏分支逐字段一致）
+   RewardObtainedMessage 只携带完整 cardModel / potionModel / relicModel / goldAmount
+   —— 没有任何索引字段；全库也不存在 MerchantPurchase 之类的消息。
+   商店卡牌走的也是 SyncLocalObtainedCard(CreationResult.Card)，即"本地解析出的那张卡"。
+   结论：    客户端本地过滤联机安全（含卡牌）。
+
+其它来源（精英 / Boss / 宝箱 / 事件 / Neow / 战斗药水 / 卡牌奖励）
+   生成路径：主机权威 + RewardSynchronizer 广播（卡牌奖励还叠加索引型选择同步）
    结论：    严格不动，超出本 mod 范围
 ```
 
-mod manifest 计划：
+mod manifest（**实际值**，以仓库根 `mod_manifest.json` 为准）：
 
 ```
 id                MerchantBlacklist
 author            @Bilibili我叫煎包
-version           v0.1.0（首发）
-affects_gameplay  true
-dependency        无
+version           0.3.0
+affects_gameplay  false
+min_game_version  0.107.1
+dependency        无（RitsuLib / ModConfig 均为可选增强，不装也能用）
 ```
 
-`affects_gameplay: true` 是诚实标记：黑名单确实改变了商店出货分布，即便不影响联机消息。
+> **更正**：本稿原先主张 `affects_gameplay: true`「诚实标记」，实现时改判为 **`false`**，这是对的。
+> v0.111.0 的 `ModelIdSerializationCache` 会在计算**联机内容哈希**时跳过 `affects_gameplay = false` 的 mod
+> （`ContentSorter` 也会把它们排到末尾）。本 mod 不注册任何 Model、不发任何网络消息，
+> 标 `true` 反而会让装了/没装本 mod 的玩家之间产生内容不一致。**不要照本稿原文改成 true。**
 
 ---
 

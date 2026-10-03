@@ -26,3 +26,6 @@ dist/
 
 # 内部 TODO（不发公开仓 / 不发 GitHub issue）
 docs/TODO_internal.md
+
+# 工具产生的临时日志（工坊上传器会写，不属于源码）
+mod-uploader.log
