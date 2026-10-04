@@ -28,20 +28,25 @@ namespace MerchantBlacklist.UI;
 public partial class BlacklistPanel : CanvasLayer
 {
     // ── 尺寸 ────────────────────────────────────────────────────────────
-    private const float MinWidth = 620f;
-    private const float MinHeight = 460f;
-    private const float MaxWidth = 1500f;
-    private const float MaxHeight = 1100f;
-    private const float TitleBarHeight = 38f;
-    private const float EdgeThreshold = 8f;
-    private const int IconSize = 72;
-    private const int CellPadding = 14;
-    private const int CellHeightExtra = 26;
-    private const int CardRowHeight = 44;        // 两行内容（上行数据 / 下行描述）
-    private const int CardRowCompactHeight = 30; // 关掉描述后的紧凑高度
-    private const int CardRowGap = 5;            // **条目之间的间隔**（用户明确要求：不要贴在一起）
-    private const int CardHeaderHeight = 32;
+    private float MinWidth => Sf(620f);
+    private float MinHeight => Sf(460f);
+    private float MaxWidth => Sf(1500f);
+    private float MaxHeight => Sf(1100f);
+    private float TitleBarHeight => Sf(42f);
+    private float EdgeThreshold => Sf(8f);
+    private int IconSize => S(72);
+    private int CellPadding => S(14);
+    private int CellHeightExtra => S(30);
+    private int CardRowHeight => S(56);        // 两行内容（上行数据 / 下行描述）
+    private int CardRowCompactHeight => S(38); // 关掉描述后的紧凑高度
+    private int CardRowGap => S(8);            // **条目之间的间隔**（用户明确要求：不要贴在一起）
+    private int CardHeaderHeight => S(40);
     /** 是否在条目第二行渲染卡牌描述（关掉即紧凑模式，一屏多看约一倍条目）*/
+    /** 全局 UI 缩放：所有尺寸/字号都乘它（1080p 为 1.0，按视口高度放大）。写死尺寸的后果实测：2560x1600 下整个面板显得又小又挤。*/
+    private float _uiScale = 1f;
+    private int S(int v) => Mathf.Max(1, Mathf.RoundToInt(v * _uiScale));
+    private float Sf(float v) => v * _uiScale;
+
     private bool _showDesc = true;
     private int _RowH => _showDesc ? CardRowHeight : CardRowCompactHeight;
     private int _RowStride => _RowH + CardRowGap;
@@ -499,9 +504,9 @@ public partial class BlacklistPanel : CanvasLayer
     {
         var vp = GetViewport()?.GetVisibleRect().Size ?? Vector2.Zero;
         bool viewportReady = vp.X >= MinWidth + 40f && vp.Y >= MinHeight + 40f;
-        if (!viewportReady) return (1000f, 700f);
-        float w = Mathf.Min(1000f, vp.X - 40f);
-        float h = Mathf.Min(700f, vp.Y - 40f);
+        if (!viewportReady) return (Sf(1000f), Sf(700f));
+        float w = Mathf.Min(Sf(1000f), vp.X - Sf(40f));
+        float h = Mathf.Min(Sf(700f), vp.Y - Sf(40f));
         return (Mathf.Max(MinWidth, w), Mathf.Max(MinHeight, h));
     }
 
@@ -533,6 +538,17 @@ public partial class BlacklistPanel : CanvasLayer
     {
         if (_builtOnce) return;
         _builtOnce = true;
+        // 先定缩放，后面所有尺寸/字号都依赖它
+        _uiScale = Mathf.Clamp((GetViewport()?.GetVisibleRect().Size.Y ?? 1080f) / 1080f, 1f, 1.8f);
+        // 自检用：临时用指定缩放构建面板（无头视口固定 1080p，看不到高分辨率下的放大效果）
+        try
+        {
+            var f2 = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "MerchantBlacklist.uiscale");
+            if (System.IO.File.Exists(f2) &&
+                float.TryParse(System.IO.File.ReadAllText(f2).Trim(), out var forced))
+                _uiScale = Mathf.Clamp(forced, 1f, 2f);
+        }
+        catch { }
 
         var (w, h) = _DefaultWindowSize();
         _window = new Panel
@@ -611,19 +627,19 @@ public partial class BlacklistPanel : CanvasLayer
         bar.AddChild(row);
 
         _titleLabel = new Label { Text = _Loc("商店黑名单", "Shop Blacklist") };
-        _titleLabel.AddThemeFontSizeOverride("font_size", 16);
+        _titleLabel.AddThemeFontSizeOverride("font_size", S(16));
         _titleLabel.AddThemeColorOverride("font_color", ColGoldBright);
         row.AddChild(_titleLabel);
 
         _categoryLabel = new Label { Text = "" };
-        _categoryLabel.AddThemeFontSizeOverride("font_size", 12);
+        _categoryLabel.AddThemeFontSizeOverride("font_size", S(12));
         _categoryLabel.AddThemeColorOverride("font_color", ColTextMute);
         row.AddChild(_categoryLabel);
 
         row.AddChild(new Control { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill });
 
         _banBadge = new Label { Text = "" };
-        _banBadge.AddThemeFontSizeOverride("font_size", 12);
+        _banBadge.AddThemeFontSizeOverride("font_size", S(12));
         _banBadge.AddThemeColorOverride("font_color", ColTextDim);
         row.AddChild(_banBadge);
 
@@ -656,7 +672,7 @@ public partial class BlacklistPanel : CanvasLayer
         bar.AddChild(row);
 
         var label = new Label { Text = _Loc("生效范围", "Applies to") };
-        label.AddThemeFontSizeOverride("font_size", 12);
+        label.AddThemeFontSizeOverride("font_size", S(12));
         label.AddThemeColorOverride("font_color", ColTextMute);
         row.AddChild(label);
 
@@ -677,7 +693,7 @@ public partial class BlacklistPanel : CanvasLayer
         row.AddChild(_charCatBtn);
 
         _catNote = new Label { Text = "" };
-        _catNote.AddThemeFontSizeOverride("font_size", 11);
+        _catNote.AddThemeFontSizeOverride("font_size", S(11));
         _catNote.AddThemeColorOverride("font_color", ColTextMute);
         row.AddChild(_catNote);
     }
@@ -697,7 +713,7 @@ public partial class BlacklistPanel : CanvasLayer
             int index = i;
             // 计数直接写进按钮文本（早先做成独立 Label 挂在按钮旁边，视觉上像两个控件）
             var btn = new Button { Text = _Loc(defs[i].zh, defs[i].en), ToggleMode = true, ButtonPressed = i == 0 };
-            btn.AddThemeFontSizeOverride("font_size", 13);
+            btn.AddThemeFontSizeOverride("font_size", S(13));
             btn.AddThemeStyleboxOverride("normal", _TabStyle(false));
             btn.AddThemeStyleboxOverride("hover", _TabStyle(true));
             btn.AddThemeStyleboxOverride("pressed", _TabStyle(true));
@@ -890,7 +906,7 @@ public partial class BlacklistPanel : CanvasLayer
     private Button _MakeChip(string text, Color tint)
     {
         var btn = new Button { Text = text, ToggleMode = true, ButtonPressed = true };
-        btn.AddThemeFontSizeOverride("font_size", 11);
+        btn.AddThemeFontSizeOverride("font_size", S(11));
         btn.AddThemeStyleboxOverride("normal", _ChipStyle(false));
         btn.AddThemeStyleboxOverride("hover", _ChipStyle(true));
         btn.AddThemeStyleboxOverride("pressed", _ChipStyle(true));
@@ -1013,7 +1029,7 @@ public partial class BlacklistPanel : CanvasLayer
     private Label _MakeFooterLabel(Node parent)
     {
         var lbl = new Label();
-        lbl.AddThemeFontSizeOverride("font_size", 11);
+        lbl.AddThemeFontSizeOverride("font_size", S(11));
         lbl.AddThemeColorOverride("font_color", ColTextMute);
         parent.AddChild(lbl);
         return lbl;
@@ -1048,7 +1064,7 @@ public partial class BlacklistPanel : CanvasLayer
         box.AddChild(col);
 
         _confirmText = new Label { AutowrapMode = TextServer.AutowrapMode.WordSmart, CustomMinimumSize = new Vector2(300, 0) };
-        _confirmText.AddThemeFontSizeOverride("font_size", 13);
+        _confirmText.AddThemeFontSizeOverride("font_size", S(13));
         _confirmText.AddThemeColorOverride("font_color", ColText);
         col.AddChild(_confirmText);
 
@@ -1083,7 +1099,7 @@ public partial class BlacklistPanel : CanvasLayer
         _toastLabel.SetAnchorsPreset(Control.LayoutPreset.CenterBottom);
         _toastLabel.OffsetLeft = -220; _toastLabel.OffsetRight = 220;
         _toastLabel.OffsetTop = -46; _toastLabel.OffsetBottom = -14;
-        _toastLabel.AddThemeFontSizeOverride("font_size", 12);
+        _toastLabel.AddThemeFontSizeOverride("font_size", S(12));
         _toastLabel.AddThemeColorOverride("font_color", ColText);
         _toastLabel.MouseFilter = Control.MouseFilterEnum.Ignore;
         _window.AddChild(_toastLabel);
@@ -1114,16 +1130,16 @@ public partial class BlacklistPanel : CanvasLayer
         top.AddThemeConstantOverride("separation", 8);
         col.AddChild(top);
         _pvCost = new Label();
-        _pvCost.AddThemeFontSizeOverride("font_size", 20);
+        _pvCost.AddThemeFontSizeOverride("font_size", S(20));
         _pvCost.AddThemeColorOverride("font_color", ColGoldBright);
         top.AddChild(_pvCost);
         _pvName = new Label();
-        _pvName.AddThemeFontSizeOverride("font_size", 15);
+        _pvName.AddThemeFontSizeOverride("font_size", S(15));
         _pvName.AddThemeColorOverride("font_color", ColText);
         top.AddChild(_pvName);
 
         _pvMeta = new Label();
-        _pvMeta.AddThemeFontSizeOverride("font_size", 11);
+        _pvMeta.AddThemeFontSizeOverride("font_size", S(11));
         _pvMeta.AddThemeColorOverride("font_color", ColTextMute);
         col.AddChild(_pvMeta);
 
@@ -1135,12 +1151,12 @@ public partial class BlacklistPanel : CanvasLayer
             CustomMinimumSize = new Vector2(220, 0),
             MouseFilter = Control.MouseFilterEnum.Ignore,
         };
-        _pvDesc.AddThemeFontSizeOverride("normal_font_size", 12);
+        _pvDesc.AddThemeFontSizeOverride("normal_font_size", S(12));
         _pvDesc.AddThemeColorOverride("default_color", new Color(0.87f, 0.82f, 0.71f));
         col.AddChild(_pvDesc);
 
         _pvBanned = new Label { Visible = false };
-        _pvBanned.AddThemeFontSizeOverride("font_size", 11);
+        _pvBanned.AddThemeFontSizeOverride("font_size", S(11));
         _pvBanned.AddThemeColorOverride("font_color", ColBan);
         col.AddChild(_pvBanned);
 
@@ -1215,11 +1231,11 @@ public partial class BlacklistPanel : CanvasLayer
             var header = new HBoxContainer();
             header.AddThemeConstantOverride("separation", 8);
             var hl = new Label { Text = _LocRarityGroup(rarity) };
-            hl.AddThemeFontSizeOverride("font_size", 14);
+            hl.AddThemeFontSizeOverride("font_size", S(14));
             hl.AddThemeColorOverride("font_color", ColGoldBright);
             header.AddChild(hl);
             var stat = new Label { Text = "" };
-            stat.AddThemeFontSizeOverride("font_size", 11);
+            stat.AddThemeFontSizeOverride("font_size", S(11));
             stat.AddThemeColorOverride("font_color", ColTextMute);
             header.AddChild(stat);
             host.AddChild(header);
@@ -1284,7 +1300,7 @@ public partial class BlacklistPanel : CanvasLayer
             MouseFilter = Control.MouseFilterEnum.Ignore,
             CustomMinimumSize = new Vector2(IconSize + CellPadding, CellHeightExtra),
         };
-        nameLabel.AddThemeFontSizeOverride("font_size", 11);
+        nameLabel.AddThemeFontSizeOverride("font_size", S(11));
         nameLabel.AddThemeColorOverride("font_color", ColText);
         nameLabel.SetAnchorsPreset(Control.LayoutPreset.BottomWide);
         nameLabel.OffsetTop = -CellHeightExtra;
@@ -1295,14 +1311,14 @@ public partial class BlacklistPanel : CanvasLayer
 
         var cross = new Label { Text = "✕", Visible = false, MouseFilter = Control.MouseFilterEnum.Ignore };
         cross.AddThemeColorOverride("font_color", new Color(1f, 0.45f, 0.45f, 1f));
-        cross.AddThemeFontSizeOverride("font_size", 26);
+        cross.AddThemeFontSizeOverride("font_size", S(26));
         cross.SetAnchorsPreset(Control.LayoutPreset.TopRight);
         cross.OffsetLeft = -24;
         cross.OffsetTop = -2;
         btn.AddChild(cross);
 
         var inheritedTag = new Label { Text = _Loc("全局", "global"), Visible = false, MouseFilter = Control.MouseFilterEnum.Ignore };
-        inheritedTag.AddThemeFontSizeOverride("font_size", 9);
+        inheritedTag.AddThemeFontSizeOverride("font_size", S(9));
         inheritedTag.AddThemeColorOverride("font_color", ColTextMute);
         inheritedTag.SetAnchorsPreset(Control.LayoutPreset.BottomRight);
         inheritedTag.OffsetLeft = -30; inheritedTag.OffsetTop = -16;
@@ -1401,7 +1417,7 @@ public partial class BlacklistPanel : CanvasLayer
                 AutowrapMode = TextServer.AutowrapMode.WordSmart,
                 MouseFilter = Control.MouseFilterEnum.Ignore,
             };
-            fallback.AddThemeFontSizeOverride("font_size", 10);
+            fallback.AddThemeFontSizeOverride("font_size", S(10));
             fallback.SetAnchorsPreset(Control.LayoutPreset.FullRect);
             host.AddChild(fallback);
         }
@@ -1598,12 +1614,12 @@ public partial class BlacklistPanel : CanvasLayer
         node.AddChild(hbox);
 
         var label = new Label();
-        label.AddThemeFontSizeOverride("font_size", 13);
+        label.AddThemeFontSizeOverride("font_size", S(13));
         label.AddThemeColorOverride("font_color", ColGoldBright);
         hbox.AddChild(label);
 
         var stat = new Label();
-        stat.AddThemeFontSizeOverride("font_size", 11);
+        stat.AddThemeFontSizeOverride("font_size", S(11));
         stat.AddThemeColorOverride("font_color", ColTextMute);
         hbox.AddChild(stat);
 
@@ -1634,7 +1650,7 @@ public partial class BlacklistPanel : CanvasLayer
         col.AddChild(hbox);
 
         var cost = new Label { CustomMinimumSize = new Vector2(26, 0), HorizontalAlignment = HorizontalAlignment.Center };
-        cost.AddThemeFontSizeOverride("font_size", 13);
+        cost.AddThemeFontSizeOverride("font_size", S(13));
         cost.AddThemeColorOverride("font_color", ColGoldBright);
         hbox.AddChild(cost);
 
@@ -1642,31 +1658,31 @@ public partial class BlacklistPanel : CanvasLayer
         // （实测在 1000 宽面板里中段空出约 600px，列表看着很散）。类型/稀有度紧随名称成列对齐，
         // ID 用 Spacer 推到最右。
         var name = new Label { CustomMinimumSize = new Vector2(300, 0), ClipText = true };
-        name.AddThemeFontSizeOverride("font_size", 13);
+        name.AddThemeFontSizeOverride("font_size", S(13));
         name.AddThemeColorOverride("font_color", ColText);
         hbox.AddChild(name);
 
         var type = new Label { CustomMinimumSize = new Vector2(52, 0) };
-        type.AddThemeFontSizeOverride("font_size", 11);
+        type.AddThemeFontSizeOverride("font_size", S(11));
         hbox.AddChild(type);
 
         var rarity = new Label { CustomMinimumSize = new Vector2(48, 0) };
-        rarity.AddThemeFontSizeOverride("font_size", 11);
+        rarity.AddThemeFontSizeOverride("font_size", S(11));
         hbox.AddChild(rarity);
 
         hbox.AddChild(new Control { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill });
 
         var id = new Label { CustomMinimumSize = new Vector2(170, 0), HorizontalAlignment = HorizontalAlignment.Right, ClipText = true };
-        id.AddThemeFontSizeOverride("font_size", 10);
+        id.AddThemeFontSizeOverride("font_size", S(10));
         id.AddThemeColorOverride("font_color", ColTextMute);
         hbox.AddChild(id);
 
         var mark = new Label { CustomMinimumSize = new Vector2(18, 0), HorizontalAlignment = HorizontalAlignment.Center };
-        mark.AddThemeFontSizeOverride("font_size", 14);
+        mark.AddThemeFontSizeOverride("font_size", S(14));
         hbox.AddChild(mark);
 
         var desc = new Label { ClipText = true, MouseFilter = Control.MouseFilterEnum.Ignore };
-        desc.AddThemeFontSizeOverride("font_size", 11);
+        desc.AddThemeFontSizeOverride("font_size", S(11));
         desc.AddThemeColorOverride("font_color", ColTextMute);
         col.AddChild(desc);
 
@@ -2474,7 +2490,7 @@ public partial class BlacklistPanel : CanvasLayer
             case 8:     // 缩到最小尺寸：看布局自适应
                 if (p._confirmOverlay != null) p._confirmOverlay.Visible = false;
                 p._confirmAction = null;
-                p._window.Size = new Vector2(MinWidth, MinHeight);
+                p._window.Size = new Vector2(p.MinWidth, p.MinHeight);
                 p._ClampWindow();
                 p._LayoutGridColumns();
                 p._HideCardPreview();
