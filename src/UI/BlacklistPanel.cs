@@ -37,8 +37,15 @@ public partial class BlacklistPanel : CanvasLayer
     private const int IconSize = 72;
     private const int CellPadding = 14;
     private const int CellHeightExtra = 26;
-    private const int CardRowHeight = 30;
-    private const int CardHeaderHeight = 28;
+    private const int CardRowHeight = 44;        // 两行内容（上行数据 / 下行描述）
+    private const int CardRowCompactHeight = 30; // 关掉描述后的紧凑高度
+    private const int CardRowGap = 5;            // **条目之间的间隔**（用户明确要求：不要贴在一起）
+    private const int CardHeaderHeight = 32;
+    /** 是否在条目第二行渲染卡牌描述（关掉即紧凑模式，一屏多看约一倍条目）*/
+    private bool _showDesc = true;
+    private int _RowH => _showDesc ? CardRowHeight : CardRowCompactHeight;
+    private int _RowStride => _RowH + CardRowGap;
+
     private const int CardRowBuffer = 6;          // 可视区上下各多留几行，滚动更顺
     private const double SearchDebounceSeconds = 0.12;
     private const int BuildChunkPerFrame = 40;    // 分帧构建：每帧最多插这么多节点
@@ -173,6 +180,8 @@ public partial class BlacklistPanel : CanvasLayer
     /** 「只看已 ban」：黑名单是长期累积的，回看时不该在几百行里翻 */
     private bool _bannedOnly;
     private Button _gridBannedOnly;
+    private Button _cardBannedOnly;
+    private Button _cardShowDesc;
 
     private bool _isDragging;
     private Vector2 _dragOffset;
@@ -208,6 +217,7 @@ public partial class BlacklistPanel : CanvasLayer
         public Label Rarity;
         public Label Id;
         public Label Mark;
+        public Label Desc;
         public string CardId;
     }
 
@@ -219,6 +229,7 @@ public partial class BlacklistPanel : CanvasLayer
     private IReadOnlyList<ModelCatalog.Entry> _relics = Array.Empty<ModelCatalog.Entry>();
     private IReadOnlyList<ModelCatalog.Entry> _potions = Array.Empty<ModelCatalog.Entry>();
     private IReadOnlyList<ModelCatalog.Entry> _cards = Array.Empty<ModelCatalog.Entry>();
+    private readonly Dictionary<string, ModelCatalog.Entry> _cardsById = new(StringComparer.Ordinal);
 
     /** 卡牌列表的"扁平行"模型：表头 + 卡牌行，带累计 Y 偏移，供虚拟滚动二分定位 */
     private sealed class FlatRow
@@ -575,6 +586,10 @@ public partial class BlacklistPanel : CanvasLayer
         _buildTimer.Timeout += _BuildNextChunk;
         AddChild(_buildTimer);
 
+        _descTimer = new Timer { Name = "DescTimer", WaitTime = 0.05, OneShot = true };
+        _descTimer.Timeout += _DrainDescriptionQueue;
+        AddChild(_descTimer);
+
         _ClampWindow();
     }
 
@@ -755,6 +770,24 @@ public partial class BlacklistPanel : CanvasLayer
             cardRow.AddChild(chip);
             _cardRarityChips[r] = chip;
         }
+        _cardBannedOnly = _MakeChip(_Loc("只看已 ban", "Banned only"), ColBan);
+        _cardBannedOnly.ButtonPressed = false;
+        _cardBannedOnly.AddThemeColorOverride("font_color", ColTextMute);
+        _cardBannedOnly.Pressed += () =>
+        {
+            _bannedOnly = _cardBannedOnly.ButtonPressed;
+            _cardBannedOnly.AddThemeColorOverride("font_color", _bannedOnly ? ColBan : ColTextMute);
+            _PaintGrids(); _RebuildCardRows(); _UpdateCounters();
+        };
+        cardRow.AddChild(_cardBannedOnly);
+
+        _cardShowDesc = _MakeChip(_Loc("显示描述", "Show text"), ColOk);
+        _cardShowDesc.Pressed += () =>
+        {
+            _showDesc = _cardShowDesc.ButtonPressed;
+            _RebuildCardRows();
+        };
+        cardRow.AddChild(_cardShowDesc);
         _cardAllowAll = _MakeActionButton(cardRow, _Loc("全启用", "Allow all"), ColOk);
         _cardAllowAll.Pressed += () => _Bulk(Kind.Card, ban: false);
         _cardBanAll = _MakeActionButton(cardRow, _Loc("全 ban", "Ban all"), ColBan);
@@ -830,9 +863,12 @@ public partial class BlacklistPanel : CanvasLayer
         active ? 2 : 1, 4, 14, 6);
 
     /** 卡牌列表的斑马纹：两行一组交替，长列表更好扫读 */
-    private static readonly StyleBoxFlat RowEven = _Flat(new Color(0f, 0f, 0f, 0f), new Color(0f, 0f, 0f, 0f), 0, 0, 8, 0);
-    private static readonly StyleBoxFlat RowOdd = _Flat(new Color(1f, 1f, 1f, 0.035f), new Color(0f, 0f, 0f, 0f), 0, 0, 8, 0);
-    private static readonly StyleBoxFlat RowHover = _Flat(new Color(ColGold.R, ColGold.G, ColGold.B, 0.16f), new Color(0f, 0f, 0f, 0f), 0, 0, 8, 0);
+    /** 卡牌条目：圆角 + 细描边的"独立卡片"（贴在一起会显得很廉价），条目之间另有间隔 */
+    private static readonly StyleBoxFlat RowEven = _Flat(new Color(0.13f, 0.11f, 0.08f, 0.55f), new Color(ColGold, 0.10f), 1, 6, 10, 4);
+    private static readonly StyleBoxFlat RowOdd = _Flat(new Color(0.17f, 0.14f, 0.09f, 0.55f), new Color(ColGold, 0.10f), 1, 6, 10, 4);
+    private static readonly StyleBoxFlat RowHover = _Flat(new Color(ColGold.R, ColGold.G, ColGold.B, 0.22f), new Color(ColGoldBright, 0.45f), 1, 6, 10, 4);
+    private static readonly StyleBoxFlat RowBanned = _Flat(new Color(0.30f, 0.08f, 0.08f, 0.45f), new Color(ColBan, 0.40f), 1, 6, 10, 4);
+    private static readonly StyleBoxFlat RowBannedInherited = _Flat(new Color(0.20f, 0.18f, 0.14f, 0.45f), new Color(ColTextMute, 0.40f), 1, 6, 10, 4);
 
     /** 滚动条跟着配色走（Godot 默认滚动条和这套黑金配色不搭）*/
     private static void _StyleScroll(ScrollContainer scroll)
@@ -1121,6 +1157,8 @@ public partial class BlacklistPanel : CanvasLayer
         _relics = ModelCatalog.Relics;
         _potions = ModelCatalog.Potions;
         _cards = ModelCatalog.Cards;
+        _cardsById.Clear();
+        foreach (var c in _cards) _cardsById[c.Id] = c;
 
         _BuildGridCells(Kind.Relic, _relics, RelicGroups, _relicGroups, _relicCells, _allRelicCells);
         _BuildGridCells(Kind.Potion, _potions, PotionGroups, _potionGroups, _potionCells, _allPotionCells);
@@ -1416,6 +1454,13 @@ public partial class BlacklistPanel : CanvasLayer
     private void _RebuildCardRows()
     {
         _visibleCardRows.Clear();
+        // 模型对象会重建 → 之前的"模型→行"绑定全部作废，行回收到空闲池（节点不销毁）
+        foreach (var kv in _assigned)
+        {
+            kv.Value.Node.Visible = false;
+            (kv.Value.IsHeader ? _freeHeaderRows : _freeCardRows).Add(kv.Value);
+        }
+        _assigned.Clear();
         int y = 0;
         string currentHeader = null;
         var bucket = new List<ModelCatalog.Entry>();
@@ -1442,12 +1487,12 @@ public partial class BlacklistPanel : CanvasLayer
             {
                 int banned = bucket.Count(c => _ActiveBanned(Kind.Card, c.Id));
                 _visibleCardRows.Add(new FlatRow { IsHeader = true, HeaderText = currentHeader, Count = bucket.Count, Banned = banned, Offset = y });
-                y += CardHeaderHeight;
+                y += CardHeaderHeight + CardRowGap;
             }
             foreach (var c in bucket)
             {
                 _visibleCardRows.Add(new FlatRow { Card = c, Offset = y });
-                y += CardRowHeight;
+                y += _RowStride;      // 步进 = 行高 + 间隔
             }
             bucket.Clear();
             currentHeader = null;
@@ -1463,45 +1508,84 @@ public partial class BlacklistPanel : CanvasLayer
         float rowWidth = Mathf.Max(120f, _cardScroll.Size.X - 16f);   // 留出滚动条宽度
 
         int first = 0, last = _visibleCardRows.Count - 1, lo = 0, hi = _visibleCardRows.Count - 1;
-        int minY = scroll - CardRowHeight * CardRowBuffer;
+        int stride = _RowStride;
+        int minY = scroll - stride * CardRowBuffer;
         while (lo <= hi)
         {
             int mid = (lo + hi) / 2;
             if (_visibleCardRows[mid].Offset < minY) { first = mid + 1; lo = mid + 1; }
             else hi = mid - 1;
         }
-        int maxY = scroll + viewH + CardRowHeight * CardRowBuffer;
+        int maxY = scroll + viewH + stride * CardRowBuffer;
         for (last = first; last < _visibleCardRows.Count && _visibleCardRows[last].Offset <= maxY; last++) { }
 
-        var want = new HashSet<int>();
-        for (int i = first; i < last; i++) want.Add(i);
+        var want = new HashSet<FlatRow>();
+        for (int i = first; i < last; i++) want.Add(_visibleCardRows[i]);
 
-        foreach (var kv in _rowPool.Where(kv => !want.Contains(kv.Key)).ToList())
+        // ── 按**模型身份**绑定，而不是按位置 ────────────────────────────────
+        // 按位置绑定的问题：窗口移动一格，"第 k 个节点"对应的模型就全变了，于是每步都要重绑所有行
+        // （每行 5 个 Label 都要重设 Text → 触发文字重排），实测 20ms/步。
+        // 按身份绑定后，小幅滚动只有新进入视区的 1~2 行需要绑定，其余只改 Position，成本几乎为零。
+        foreach (var kv in _assigned.ToList())
         {
-            kv.Value.Node.QueueFree();
-            _rowPool.Remove(kv.Key);
+            if (want.Contains(kv.Key)) continue;
+            kv.Value.Node.Visible = false;
+            (kv.Value.IsHeader ? _freeHeaderRows : _freeCardRows).Add(kv.Value);
+            _assigned.Remove(kv.Key);
         }
 
-        for (int i = first; i < last; i++)
+        int cardShown = 0, headerShown = 0;
+        foreach (var model in want)
         {
-            var model = _visibleCardRows[i];
-            if (!_rowPool.TryGetValue(i, out var row) || row.IsHeader != model.IsHeader)
+            if (!_assigned.TryGetValue(model, out var row))
             {
-                if (row != null) { row.Node.QueueFree(); _rowPool.Remove(i); }
-                row = model.IsHeader ? _MakeCardHeaderRow() : _MakeCardRow();
-                _cardSizer.AddChild(row.Node);
-                _rowPool[i] = row;
+                row = _TakeRow(model.IsHeader);
+                _assigned[model] = row;
+                _BindRow(row, model);
+                if (!model.IsHeader) _ApplyRowStyle(row, model);
+                row.Node.Visible = true;
             }
-            _BindRow(row, model);
-            if (!model.IsHeader)
-                row.Node.AddThemeStyleboxOverride("normal", (i % 2 == 0) ? RowEven : RowOdd);
-
-            // 关键：行是 _cardSizer 的普通子节点，**必须自己摆位置**。
-            // 漏掉这一步的后果实测是所有行都堆在 (0,0) 重叠成一团（卡牌列表整片空白＋首行文字糊在一起）。
-            float rowH = model.IsHeader ? CardHeaderHeight : CardRowHeight;
+            if (model.IsHeader) headerShown++; else cardShown++;
             row.Node.Position = new Vector2(0, model.Offset);
-            row.Node.Size = new Vector2(rowWidth, rowH);
+            row.Node.Size = new Vector2(rowWidth, model.IsHeader ? CardHeaderHeight : _RowH);
         }
+        _pooledCardRows = cardShown;
+        _pooledHeaderRows = headerShown;
+    }
+
+    private readonly Dictionary<FlatRow, Row> _assigned = new();
+    private readonly List<Row> _freeCardRows = new();
+    private readonly List<Row> _freeHeaderRows = new();
+    private readonly List<Row> _cardRowPool = new();
+    private readonly List<Row> _headerRowPool = new();
+    private int _pooledCardRows;
+    private int _pooledHeaderRows;
+
+    private Row _TakeRow(bool isHeader)
+    {
+        var free = isHeader ? _freeHeaderRows : _freeCardRows;
+        if (free.Count > 0)
+        {
+            var reused = free[^1];
+            free.RemoveAt(free.Count - 1);
+            return reused;
+        }
+        var row = isHeader ? _MakeCardHeaderRow() : _MakeCardRow();
+        _cardSizer.AddChild(row.Node);
+        (isHeader ? _headerRowPool : _cardRowPool).Add(row);
+        return row;
+    }
+
+    /** 条目底色：斑马纹用 model.Offset 判定（与池位置无关，滚动时不会跳色）+ 已 ban 状态 */
+    private void _ApplyRowStyle(Row row, FlatRow model)
+    {
+        bool banned = _ActiveBanned(Kind.Card, model.Card.Id);
+        bool inherited = _IsInherited(Kind.Card, model.Card.Id);
+        int stride = _RowStride;
+        bool odd = (model.Offset / stride) % 2 == 1;
+        row.Node.AddThemeStyleboxOverride("normal", banned
+            ? (inherited ? RowBannedInherited : RowBanned)
+            : (odd ? RowOdd : RowEven));
     }
 
     private Row _MakeCardHeaderRow()
@@ -1529,16 +1613,25 @@ public partial class BlacklistPanel : CanvasLayer
     private Row _MakeCardRow()
     {
         var node = new Button { Flat = true, FocusMode = Control.FocusModeEnum.All };
-        node.CustomMinimumSize = new Vector2(0, CardRowHeight);
+        node.CustomMinimumSize = new Vector2(0, CardRowCompactHeight);   // 上限由 _UpdateCardWindow 显式设 Size 决定
         node.AddThemeStyleboxOverride("normal", RowEven);      // 斑马纹在 _UpdateCardWindow 里按行号覆盖
         node.AddThemeStyleboxOverride("hover", RowHover);
         node.AddThemeStyleboxOverride("pressed", RowHover);
         node.AddThemeStyleboxOverride("focus", RowHover);
 
+        // 两行结构：上行 = 费用 / 名称 / 类型 / 稀有度 / ID / 标记；下行 = 卡牌描述。
+        // 描述用第二行而不是挤在同一行，是为了保持可扫读性（一行塞太多信息会很乱）。
+        var col = new VBoxContainer { MouseFilter = Control.MouseFilterEnum.Ignore };
+        // 不要用 FullRect：stylebox 的 content margin 不会影响手动锚定的子节点，
+        // 结果就是第一行（有最小宽度的费用列）看着有缩进、第二行描述却顶到边框上。
+        col.SetAnchorsPreset(Control.LayoutPreset.FullRect);
+        col.OffsetLeft = 10; col.OffsetRight = -10; col.OffsetTop = 3; col.OffsetBottom = -3;
+        col.AddThemeConstantOverride("separation", 2);
+        node.AddChild(col);
+
         var hbox = new HBoxContainer { MouseFilter = Control.MouseFilterEnum.Ignore };
-        hbox.SetAnchorsPreset(Control.LayoutPreset.FullRect);
         hbox.AddThemeConstantOverride("separation", 8);
-        node.AddChild(hbox);
+        col.AddChild(hbox);
 
         var cost = new Label { CustomMinimumSize = new Vector2(26, 0), HorizontalAlignment = HorizontalAlignment.Center };
         cost.AddThemeFontSizeOverride("font_size", 13);
@@ -1572,7 +1665,12 @@ public partial class BlacklistPanel : CanvasLayer
         mark.AddThemeFontSizeOverride("font_size", 14);
         hbox.AddChild(mark);
 
-        var row = new Row { Node = node, Name = name, Cost = cost, Type = type, Rarity = rarity, Id = id, Mark = mark };
+        var desc = new Label { ClipText = true, MouseFilter = Control.MouseFilterEnum.Ignore };
+        desc.AddThemeFontSizeOverride("font_size", 11);
+        desc.AddThemeColorOverride("font_color", ColTextMute);
+        col.AddChild(desc);
+
+        var row = new Row { Node = node, Name = name, Cost = cost, Type = type, Rarity = rarity, Id = id, Mark = mark, Desc = desc };
 
         node.Pressed += () => { if (row.CardId != null) _ToggleBan(Kind.Card, row.CardId); };
         node.GuiInput += ev =>
@@ -1669,6 +1767,67 @@ public partial class BlacklistPanel : CanvasLayer
         row.Id.Text = inherited ? c.Id + _Loc(" · 全局", " · global") : c.Id;
         row.Mark.Text = banned ? "✕" : "○";
         row.Mark.AddThemeColorOverride("font_color", banned ? (inherited ? ColTextMute : ColBan) : ColTextMute);
+
+        // 第二行描述：解析很贵（实测**每条约 10ms**，519 条一次性要 5 秒），所以：
+        //   1) 只解析**可视行**（虚拟滚动下同时存活 ~16 行）；
+        //   2) 结果按 id 缓存，滚动回来不再重复解析；
+        //   3) 每帧只解析 3 条（Timer 摊平），未解析完的先显示 "…"，避免滚动时掉帧。
+        if (row.Desc != null)
+        {
+            row.Desc.Visible = _showDesc;
+            if (!_showDesc) return;
+            if (_descCache.TryGetValue(c.Id, out var text))
+            {
+                row.Desc.Text = text;
+            }
+            else
+            {
+                row.Desc.Text = "…";
+                if (_descPending.Add(c.Id))
+                {
+                    _descQueue.Enqueue(c.Id);
+                    _descTimer?.Start();
+                }
+            }
+        }
+    }
+
+    private readonly Dictionary<string, string> _descCache = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _descPending = new(StringComparer.Ordinal);
+    private readonly Queue<string> _descQueue = new();
+    private Timer _descTimer;
+    private int _descResolved;
+
+    /// <summary>每 tick 只解析少量描述，把 ~10ms/条 的代价摊到多帧，滚动时不掉帧。</summary>
+    private void _DrainDescriptionQueue()
+    {
+        const int budgetPerTick = 3;
+        int done = 0;
+        while (done < budgetPerTick && _descQueue.Count > 0)
+        {
+            var id = _descQueue.Dequeue();
+            _descPending.Remove(id);
+            if (!_cardsById.TryGetValue(id, out var entry)) continue;
+            _descCache[id] = _ToPlainText(entry.Description);
+            _descResolved++;
+            done++;
+        }
+        if (_descQueue.Count > 0) _descTimer?.Start();
+        else _UpdateCardWindow();     // 队列排空后刷新一次，把 "…" 换成正文
+    }
+
+    /// <summary>
+    /// 把游戏的富文本标记转成**纯文本**（用于 Label）。
+    /// 与 <see cref="_ToGodotBbcode"/> 的区别：这里不产生任何标记，只去掉标记与未解析的动态占位符。
+    /// </summary>
+    private static string _ToPlainText(string text)
+    {
+        if (string.IsNullOrEmpty(text)) return string.Empty;
+        text = System.Text.RegularExpressions.Regex.Replace(
+            text, @"\[/?[A-Za-z_][A-Za-z0-9_]*(?::[^\]]*)?\]", string.Empty);
+        text = System.Text.RegularExpressions.Regex.Replace(
+            text, @"[({][A-Za-z_][A-Za-z0-9_]*:[^{}\[\]]*[)}]", "?");
+        return text.Replace("\n", " ").Trim();
     }
 
     // ── 绘制（原地更新，绝不重建）──────────────────────────────────────
@@ -2287,7 +2446,7 @@ public partial class BlacklistPanel : CanvasLayer
                 return true;
             case 3:     // 卡牌 + 原生悬停浮窗（走真实 hover 路径）
                 {
-                    var row = p._rowPool.Values.FirstOrDefault(r => !r.IsHeader && r.CardId != null);
+                    var row = p._cardRowPool.FirstOrDefault(r => r.Node.Visible && r.CardId != null);
                     if (row != null) p._BeginCardHover(row.Node, row.CardId, row.Name);
                     return true;
                 }
@@ -2342,6 +2501,9 @@ public partial class BlacklistPanel : CanvasLayer
                 if (p._gridBannedOnly != null) p._gridBannedOnly.ButtonPressed = false;
                 p._SetPoseTab(Tab.Cards);
                 p._PaintAll();
+                return true;
+            case 11:    // 性能实测
+                MeasureCardListPerformance();
                 return true;
             default:
                 return false;
@@ -2499,12 +2661,72 @@ public partial class BlacklistPanel : CanvasLayer
         }
     }
 
+    // ── 卡牌列表性能实测（回答"把文字也渲染上会不会卡"）──────────────────
+    internal static void MeasureCardListPerformance()
+    {
+        var p = ShotPanel();
+        if (p == null) return;
+        p._SetPoseTab(Tab.Cards);
+        p._RebuildCardRows();
+
+        var sw = new System.Diagnostics.Stopwatch();
+        const int rebuilds = 20;
+        sw.Restart();
+        for (int i = 0; i < rebuilds; i++) p._RebuildCardRows();
+        sw.Stop();
+        double rebuildMs = sw.Elapsed.TotalMilliseconds / rebuilds;
+
+        int total = (int)p._cardSizer.CustomMinimumSize.Y;
+        int step = Mathf.Max(1, (int)(p._cardScroll.Size.Y / 2f));
+
+        // 冷遍历：会触发描述解析（每条约 10ms，按帧摊平）
+        int steps = 0;
+        sw.Restart();
+        for (int y = 0; y < total; y += step) { p._cardScroll.ScrollVertical = y; p._UpdateCardWindow(); steps++; }
+        sw.Stop();
+        double coldMs = steps > 0 ? sw.Elapsed.TotalMilliseconds / steps : 0;
+
+        // 热遍历：描述已全部缓存，纯换窗 + 重绑 + 重定位
+        int warmSteps = 0;
+        sw.Restart();
+        for (int y = 0; y < total; y += step) { p._cardScroll.ScrollVertical = y; p._UpdateCardWindow(); warmSteps++; }
+        sw.Stop();
+        double warmMs = warmSteps > 0 ? sw.Elapsed.TotalMilliseconds / warmSteps : 0;
+
+        MerchantBlacklistLog.Info(
+            $"[SelfTest] perf/cardlist: rows={p._visibleCardRows.Count} stride={p._RowStride} " +
+            $"rebuild={rebuildMs:F2}ms/次 scroll冷={coldMs:F2}ms/步 scroll热={warmMs:F2}ms/步({warmSteps}步) " +
+            $"pooledRows={p._pooledCardRows}+{p._pooledHeaderRows}(复用,零创建) showDesc={p._showDesc} " +
+            $"descResolved={p._descResolved} descCache={p._descCache.Count} descQueue={p._descQueue.Count}");
+
+        // 对照：一次性解析全部 519 条描述要多久（说明为什么不能全量渲染）
+        sw.Restart();
+        int n = 0;
+        foreach (var e in p._cards) { _ = e.Description; n++; }
+        sw.Stop();
+        MerchantBlacklistLog.Info(
+            $"[SelfTest] perf/cardlist(全量对照): resolved={n} 一次性={sw.Elapsed.TotalMilliseconds:F1}ms " +
+            $"→ 惰性方案只解析可视行，差 {sw.Elapsed.TotalMilliseconds / Mathf.Max(1, p._descResolved):F1}× 量级");
+
+        p._cardScroll.ScrollVertical = 0;
+        p._UpdateCardWindow();
+
+        // 文案诊断：描述首字疑似被吃掉，直接把原文与处理后文本打出来对比
+        foreach (var id in new[] { "OMNISLICE", "SEVEN_STARS", "CRUSH_UNDER" })
+        {
+            if (!p._cardsById.TryGetValue(id, out var e)) continue;
+            var raw = e.Description ?? "";
+            MerchantBlacklistLog.Info(
+                $"[SelfTest] desc/{id}: raw=[{raw}] processed=[{_ToPlainText(raw)}] rawLen={raw.Length}");
+        }
+    }
+
     private void _SelfTestReport(string stage)
     {
         int relicCells = _allRelicCells.Count;
         int potionCells = _allPotionCells.Count;
         int cardRows = _visibleCardRows.Count(r => !r.IsHeader);
-        int pooled = _rowPool.Count;
+        int pooled = _pooledCardRows + _pooledHeaderRows;
         int colorless = _cards.Count(c => c.IsColorless);
         int relicVisible = _allRelicCells.Count(c => c.Node.Visible);
         int potionVisible = _allPotionCells.Count(c => c.Node.Visible);
